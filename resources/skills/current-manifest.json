@@ -144,6 +144,24 @@
           "identitySha256": "cd1b364bf35781bad06bf75ab1766afa8d6cec69cb2060529691d89871a2098a"
         }
       ]
+    },
+    {
+      "name": "zcode",
+      "sourcePath": "skills/zcode",
+      "releaseRevision": 1,
+      "packageDigest": "52cf9a7fd73045bf3479fa3135f42b8562943a01eb51d02554099f6727155cf0",
+      "gitTreeSha": "dcf7bebb711193c8d3ad6cba3cb670e8a0c70afa",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "size": 2371,
+          "executable": false,
+          "classification": "text",
+          "exactSha256": "196404950ae6045b3974cc6f9d58005277cf8d1562becdde6ebc7bd790eb6a3e",
+          "textNormalizedSha256": "196404950ae6045b3974cc6f9d58005277cf8d1562becdde6ebc7bd790eb6a3e",
+          "identitySha256": "196404950ae6045b3974cc6f9d58005277cf8d1562becdde6ebc7bd790eb6a3e"
+        }
+      ]
     }
   ]
 }
