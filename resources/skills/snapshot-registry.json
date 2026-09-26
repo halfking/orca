@@ -1061,24 +1061,6 @@
         ]
       }
     ],
-    "mobile-fit-debug": [
-      {
-        "releaseRevision": 1,
-        "packageDigest": "97ff3f85018bdea5e4518325423b159708eabe16cde3fbf7297525fa084d6a46",
-        "gitTreeSha": "9ff10aaeea448fa956cd4708b7f3b8242d178c0a",
-        "files": [
-          {
-            "path": "SKILL.md",
-            "size": 9414,
-            "executable": false,
-            "classification": "text",
-            "exactSha256": "84aa7cc18ed03df90f40c3c70650a0ad3df941a5e1f80870bd00cf6b9b7f7eab",
-            "textNormalizedSha256": "84aa7cc18ed03df90f40c3c70650a0ad3df941a5e1f80870bd00cf6b9b7f7eab",
-            "identitySha256": "84aa7cc18ed03df90f40c3c70650a0ad3df941a5e1f80870bd00cf6b9b7f7eab"
-          }
-        ]
-      }
-    ],
     "computer-use": [
       {
         "releaseRevision": 1,

@@ -501,6 +501,26 @@ jobs:
               # We still raise latest_stable to the floor below so the explicit
               # version is gated against it; the collision recovery for the
               # requested tag runs later.
+              #
+              # Why also skip the floor lift for kind=rc without an explicit
+              # version: an RC's purpose is to stabilize the next patch after
+              # what is *currently published as stable*. If we silently raised
+              # latest_stable to package_stable here, an rc dispatch from a
+              # ref whose package.json advanced (e.g. a 1.3.5 stable that was
+              # nuked post-publish leaving package.json at 1.3.6) would cut
+              # v1.3.7-rc.0 against a published v1.3.5 — every client on
+              # v1.3.6 (the real current ref stable) would be told to
+              # downgrade to the rc, then back up to the next patch. Anchoring
+              # the rc base on the published stable keeps the RC chain
+              # pointing at the *next* patch that this cut will turn stable,
+              # not whatever number happens to live in package.json of an
+              # orphan or in-flight ref. The bump(latest_stable, patch) call
+              # in the rc branch below then produces 1.3.7 (correct next
+              # patch after 1.3.6 stable), not the floor-inflated 1.3.8 that
+              # would orphan 1.3.7. Stable kinds (patch/minor/major) still
+              # get the floor lift, which is what they need: a stable cut's
+              # published number *is* the floor, and cutting below it would
+              # strand clients on the nuked version.
               if [[ "$KIND" != "rc" && -z "${EXPLICIT_VERSION:-}" ]]; then
                 package_tag="v$package_stable"
                 if git rev-parse "$package_tag" >/dev/null 2>&1; then
