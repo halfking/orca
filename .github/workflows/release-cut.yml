@@ -528,8 +528,14 @@ jobs:
                 fi
               fi
 
-              echo "Stable floor from package.json: $package_stable"
-              latest_stable="$package_stable"
+              # Floor lift: skip for KIND=rc without an explicit version, so
+              # the rc base stays anchored to the published stable version
+              # (next patch) instead of being inflated to the in-flight
+              # package.json floor. See block comment above for rationale.
+              if [[ "$KIND" != "rc" || -n "${EXPLICIT_VERSION:-}" ]]; then
+                echo "Stable floor from package.json: $package_stable"
+                latest_stable="$package_stable"
+              fi
             fi
           fi
 
