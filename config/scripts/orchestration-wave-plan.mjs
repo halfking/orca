@@ -247,6 +247,9 @@ function ledgerEntryFor(task, launch, { base, argv, event = 'worker-start' }) {
     agent: launch.agent,
     model: launch.model,
     effort: launch.effort,
+    // Plan-level dependencies, not runtime ids: the view resolves blocking by name, and a task
+    // re-created under a new id must not silently detach from what waits on it.
+    deps: task.deps ?? [],
     placement: { worktree: task.worktree ?? 'new-child', base, isolation: 'worktree' },
     state: 'ready',
     nextAction: argv
@@ -374,14 +377,16 @@ function shellQuote(part) {
 
 /**
  * `--deps` must carry real Task ids, which only exist once `task-create` has answered, so the
- * literal is rebuilt with shell expansion instead of being baked in at compile time.
+ * literal is rebuilt with shell expansion instead of being baked in at compile time. Each element
+ * is quoted on both sides: `["$A","$B"]` and not `["$A,"$B"]`, which is what one join separator
+ * short of correct produces, and which still looks plausible in a terminal.
  */
 function depsFragment(depVars) {
   if (depVars.length === 0) {
     return shellQuote('[]')
   }
-  const refs = depVars.map((name) => `\${${name}}`).join(',\\"')
-  return `"[\\"${refs}\\"]"`
+  const refs = depVars.map((name) => `\\"\${${name}}\\"`).join(',')
+  return `"[${refs}]"`
 }
 
 function renderCommand(step, { program }) {
@@ -422,13 +427,16 @@ const PREAMBLE = (ledgerPath) =>
       'process.stdout.write(String(t?.id??t?.taskId??""))\' "$1"',
     '}',
     '',
-    '# Merge the live dispatch/gate id from the receipt into the entry the compiler prepared.',
+    '# Merge the live dispatch id and the runtime task id from the receipt into the entry the',
+    '# compiler prepared. The plan id stays the key: the DAG, the merge order and every report are',
+    '# keyed on it, and a view keyed on runtime ids stops matching the plan that produced them.',
     '__orca_ledger() {',
-    "  node -e 'const [run,task,receipt,entry]=process.argv.slice(1);" +
+    "  node -e 'const [run,task,runtimeTaskId,receipt,raw]=process.argv.slice(1);" +
       'const j=JSON.parse(receipt);const r=j?.result??j;' +
-      'entry.dispatch=r?.dispatchId??r?.dispatch_id??null;' +
-      'if(r?.gate?.id){entry.gate={id:r.gate.id,resolved:false}}' +
-      'process.stdout.write(JSON.stringify({...entry,run,task}))\' "$1" "$2" "$3" "$4" \\',
+      'const e=JSON.parse(raw);' +
+      'e.dispatch=r?.dispatchId??r?.dispatch_id??null;' +
+      'if(r?.gate?.id){e.gate={id:r.gate.id,resolved:false}}' +
+      'process.stdout.write(JSON.stringify({...e,run,task,runtimeTaskId}))\' "$1" "$2" "$3" "$4" "$5" \\',
     '    | node "$LEDGER" record --stdin',
     '}'
   ].join('\n')
@@ -460,7 +468,7 @@ function renderShell(steps) {
       const receiptVar = step.dispatchVar ?? step.gateVar
       lines.push(`${receiptVar}="$(${command})"`)
       lines.push(
-        `__orca_ledger "$RUN_ID" "$${step.taskVar}" "$${receiptVar}" ${shellQuote(
+        `__orca_ledger "$RUN_ID" '${step.task}' "$${step.taskVar}" "$${receiptVar}" ${shellQuote(
           JSON.stringify(step.ledger)
         )}`
       )

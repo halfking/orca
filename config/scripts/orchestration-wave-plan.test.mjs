@@ -282,4 +282,25 @@ describe('compiling a plan into commands', () => {
       'gate-create'
     )
   })
+
+  it('records dependencies in the ledger by plan name, so the view can resolve blocking', () => {
+    const result = compilePlan(plan())
+    const auditA = result.steps.find(
+      (step) => step.kind === 'worker-start' && step.task === 'audit_a'
+    )
+    const merge = result.steps.find((step) => step.kind === 'gate-create' && step.task === 'merge')
+    expect(auditA.ledger.deps).toEqual(['impl_a'])
+    expect(merge.ledger.deps).toEqual(['audit_a', 'audit_b'])
+  })
+
+  it('leaves the task id to the runtime and keeps only what is known at compile time', () => {
+    const result = compilePlan(plan())
+    const start = result.steps.find(
+      (step) => step.kind === 'worker-start' && step.task === 'impl_a'
+    )
+    // The runtime task id only exists once task-create answers. The plan id is what every report is
+    // keyed on, and it is written at dispatch time rather than compiled into the entry.
+    expect(start.ledger.task).toBeUndefined()
+    expect(start.ledger.deps).toEqual([])
+  })
 })

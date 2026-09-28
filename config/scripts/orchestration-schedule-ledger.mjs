@@ -53,6 +53,7 @@ export function normalizeEntry(raw) {
     findings: raw.findings ?? null,
     regression: raw.regression ?? null,
     nextAction: Array.isArray(raw.nextAction) ? raw.nextAction : null,
+    runtimeTaskId: raw.runtimeTaskId ?? null,
     deps: Array.isArray(raw.deps) ? raw.deps : [],
     filesModified: Array.isArray(raw.filesModified) ? raw.filesModified : [],
     reportPath: raw.reportPath ?? null,
@@ -120,6 +121,7 @@ export function foldLedger(entries) {
         placement: null,
         state: 'pending',
         dispatch: null,
+        runtimeTaskId: null,
         liveness: null,
         stage: null,
         outcome: null,
@@ -136,6 +138,12 @@ export function foldLedger(entries) {
     const task = tasks.get(id)
     if (entry.dispatch) {
       task.dispatch = entry.dispatch
+    }
+    // The plan's own id is what the DAG, the merge order and every report are keyed on. The
+    // runtime id is kept beside it, never instead of it: a view keyed on runtime ids fragments
+    // the moment a task is re-created, and stops matching the plan that produced it.
+    if (entry.runtimeTaskId) {
+      task.runtimeTaskId = entry.runtimeTaskId
     }
     if (entry.role) {
       task.role = entry.role

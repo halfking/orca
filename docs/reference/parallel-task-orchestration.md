@@ -330,6 +330,22 @@ node config/scripts/orchestration-argv-contract-check.mjs
 
 当前结果：7 条命令全部 `ACCEPTED`，含 `--worktree new-child`、`--base-branch`、`--setup`、`--deps`、`--agent`、`--model`、`--effort` 与 gate 的 `--options`。
 
+#### 4.7.5 已验证：生成的脚本被真正执行过
+
+前两项验的是"文本对不对"，这一项验的是"跑起来对不对"。用一个桩 `orca`（返回结构真实的收据，task id 故意在 `result.task.id` 与 `result.taskId` 两处轮换）把生成的脚本 `bash` 跑一遍，再检查：脚本是否跑完、每个任务是否创建、每个派发是否发生、`--deps` 展开后是否仍是合法 JSON 且装的是真实 id、账本里是否落了正确的 dispatch id、波次与依赖是否解析成 implement / audit / merge。
+
+```text
+pnpm run verify:orchestration-generated-script
+```
+
+**这一步抓到了三个只做语法检查永远发现不了的 bug**：
+
+1. **账本记的是运行时 id 而不是计划名**——`task_3` 顶掉了 `impl_a`，于是 DAG 依赖、波次、合并顺序全部对不上。修法是账本以计划 id 为键，运行时 id 另存 `runtimeTaskId`；任务被重建时视图不会与产生它的计划脱节。
+2. **多依赖时 `--deps` 生成非法 JSON**——`["task_7,"task_9"]`，少一个右引号。单个依赖时完全正常，所以更隐蔽。
+3. **账本条目被整个丢掉**——shell helper 里写的是 `{...entry}`，而 `entry` 是 JSON **字符串**，展开成的是 `{0:'{',1:'"'…}`。结果每次派发写进账本的 `role`/`agent`/`model`/`placement`/`state`/`nextAction` **全是 null**：调度路径可见这个特性会只记 id，等于没有。
+
+第 3 条是这一整轮最值得记住的：**82 个单测全绿、argv 契约全绿、`bash -n` 通过，而特性本身是不工作的。** 只有把脚本真正执行一次、把产出的账本真正读一遍，才看得见。
+
 #### 4.7.3 已实现：`config/scripts/orchestration-merge-gate.mjs`
 
 把 4.5 的 verdict 契约和 4.6 的合并协议变成 fail-closed 的两道闸：
