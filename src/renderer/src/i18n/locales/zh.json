@@ -6522,7 +6522,14 @@
           "kaixuanConfigNotLoaded": "not loaded",
           "kaixuanActiveBadge": "active",
           "kaixuanClearButton": "Clear (revert to system default)",
-          "kaixuanButtonActive": "Active: {{label}}"
+          "kaixuanButtonActive": "Active: {{label}}",
+          "kaixuanCaveat": "Read before enabling. The kxpms gateway ships an OpenAI Responses endpoint; ClaudeCode walks the Anthropic /v1/messages protocol. Apply will write the right base URL into ~/.claude/settings.json, but ClaudeCode worker calls may 404/501 against the upstream until the gateway team exposes an Anthropic-compatible route. Codex and OpenCode both speak OpenAI Responses and work as soon as OPENAI_API_KEY is set in the shell that runs the agent.",
+          "kaixuanApiKeyTitle": "Inline API key (ClaudeCode / OpenCode)",
+          "kaixuanApiKeyDescription": "Optional. When set, the literal token is written as ANTHROPIC_AUTH_TOKEN into ~/.claude/settings.json and as options.apiKey into ~/.config/opencode/opencode.json. Codex is unaffected — it reads OPENAI_API_KEY from the shell at agent startup. Leave blank if you exported the token in the shell that runs the worker and want ClaudeCode to inherit it.",
+          "kaixuanApiKeyLabel": "Inline API key",
+          "kaixuanApiKeyClear": "Clear",
+          "kaixuanAgentClaudeCaveat": "Writes ANTHROPIC_BASE_URL into ~/.claude/settings.json. Provide the inline API key above to also embed ANTHROPIC_AUTH_TOKEN — otherwise ClaudeCode must inherit it from the shell that runs it.",
+          "kaixuanAgentOpencodeCaveat": "Writes provider.kaixuan-<id> with options.baseURL + options.apiKey. OpenCode uses {env:OPENAI_API_KEY} when the inline key is blank — make sure the shell running opencode has it exported."
         },
         "AdvancedPane": {
           "40b29e0bf3": "重新启动",

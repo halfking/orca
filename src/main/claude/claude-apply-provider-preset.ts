@@ -1,9 +1,17 @@
 // What: 给 ClaudeCode 系统 settings.json 写 kaixuan preset 的 env 注入。
-// presetId=kaixuan-local/kaixuan-kxpms 时写入 env.ANTHROPIC_BASE_URL + env.ANTHROPIC_AUTH_TOKEN(envKey placeholder)；
-// presetId=null 时把 env 里残留的 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN 全清。
+// presetId=kaixuan-local/kaixuan-kxpms 时写入 env.ANTHROPIC_BASE_URL；
+// 若调用方提供了 apiKey，再写 env.ANTHROPIC_AUTH_TOKEN=<token 字面值>。
+// presetId=null 时把 env 里残留的 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY 全清。
 //
 // Why: ClaudeCode 通过 ~/.claude/settings.json 的 env 段切换厂商 base URL。
 // Orca 的 claude-config-dir-pin.ts 把 CLAUDE_CONFIG_DIR 固定到当前账号的 configDirName，所以这里的"系统 config"是 ~/.claude/<configDirName>/settings.json。
+//
+// Why we DON'T emit `${OPENAI_API_KEY}` like literal strings: ClaudeCode does no
+// shell-style variable expansion inside settings.json's env block. Whatever string
+// sits there gets sent verbatim to the upstream as the bearer token. So if the
+// caller wants the gateway credential to be embedded, they must supply the literal
+// token; otherwise we omit ANTHROPIC_AUTH_TOKEN entirely and let the user's shell
+// export (or ANTHROPIC_API_KEY) win at ClaudeCode startup.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
@@ -30,10 +38,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Pure helper — exposed for testing. Apply (or remove) kaixuan env entries
  *  against the parsed settings object.
+ *  @param apiKey  inline bearer token to write as ANTHROPIC_AUTH_TOKEN. null/undefined
+ *                means "leave it to the user's shell env / ANTHROPIC_API_KEY".
  */
 export function applyKaixuanToClaudeSettings(
   settings: unknown,
-  presetId: KaixuanPresetId | null
+  presetId: KaixuanPresetId | null,
+  apiKey?: string | null
 ): Record<string, unknown> {
   const next: Record<string, unknown> = isRecord(settings) ? { ...settings } : {}
   const envRaw = next.env
@@ -52,11 +63,10 @@ export function applyKaixuanToClaudeSettings(
   if (presetId !== null) {
     const preset = KAIXUAN_PRESETS[presetId]
     env.ANTHROPIC_BASE_URL = preset.claudeBaseUrl
-    // Why: ClaudeCode fallback chain is ANTHROPIC_AUTH_TOKEN → ANTHROPIC_API_KEY.
-    // The kaixuan endpoint accepts the OPENAI_API_KEY env var, so we point
-    // ClaudeCode at the same variable via the OAuth-style token slot. Users may
-    // override by setting ANTHROPIC_API_KEY after apply (preserved across calls).
-    env.ANTHROPIC_AUTH_TOKEN = `\${${preset.envKeyName}}`
+    if (typeof apiKey === 'string' && apiKey.length > 0) {
+      // Inline the literal token; ClaudeCode will read it verbatim from settings.json.
+      env.ANTHROPIC_AUTH_TOKEN = apiKey
+    }
   }
   next.env = env
   return next
@@ -79,7 +89,12 @@ export function readActiveClaudeKaixuanPreset(settings: unknown): KaixuanPresetI
   return null
 }
 
-/** Apply or remove the kaixuan preset on disk. */
+/** Apply or remove the kaixuan preset on disk.
+ *  @param options.apiKey  optional inline bearer token. When provided, written as a
+ *                         literal string into settings.json's env.ANTHROPIC_AUTH_TOKEN.
+ *                         When omitted (or null), ANTHROPIC_AUTH_TOKEN is left absent
+ *                         so the user's shell env or ANTHROPIC_API_KEY remains in effect.
+ */
 export function applyClaudeKaixuanPreset(
   presetId: KaixuanPresetId | null,
   options?: { configDirName?: string; apiKey?: string | null }
@@ -96,20 +111,7 @@ export function applyClaudeKaixuanPreset(
         current = {}
       }
     }
-    const next = applyKaixuanToClaudeSettings(current, presetId)
-    // apiKey plumbing: when caller supplied an inline token, write it through the
-    // ClaudeCode-blessed slot so it survives across CLI invocations. Stored-encrypted
-    // equivalent here is "the user chose to embed"; future hardening can swap to
-    // a keytar-backed env resolver.
-    if (presetId !== null && options?.apiKey) {
-      const env: Record<string, string> = isRecord(next.env)
-        ? Object.fromEntries(
-            Object.entries(next.env).filter((e): e is [string, string] => typeof e[1] === 'string')
-          )
-        : {}
-      env.ANTHROPIC_AUTH_TOKEN = options.apiKey
-      next.env = env
-    }
+    const next = applyKaixuanToClaudeSettings(current, presetId, options?.apiKey ?? null)
     writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8')
     return { agentId: 'claude', configPath, presetId, error: null }
   } catch (error) {

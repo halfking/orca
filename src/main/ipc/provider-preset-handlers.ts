@@ -5,12 +5,6 @@
 // preload 在 src/preload/api/provider-preset-api.ts 暴露给 renderer 为 window.api.providerPresets.*。
 import { ipcMain } from 'electron'
 import {
-  KAIXUAN_PRESETS,
-  type KaixuanPresetId,
-  type ProviderPresetAgentId,
-  type ProviderPresetApplyResult
-} from '../../shared/provider-preset-types'
-import {
   applyCodexKaixuanPreset,
   readActiveCodexKaixuanPreset
 } from '../codex/codex-apply-provider-preset'
@@ -22,9 +16,18 @@ import {
   applyOpenCodeKaixuanPreset,
   readActiveOpenCodeKaixuanPresetFromDisk
 } from '../opencode/opencode-apply-provider-preset'
+import type {
+  KaixuanPresetId,
+  ProviderPresetAgentId,
+  ProviderPresetApplyResult
+} from '../../shared/provider-preset-types'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getSystemCodexHomePath } from '../codex/codex-home-paths'
+
+function isKnownPresetId(value: string): value is KaixuanPresetId {
+  return value === 'kaixuan-local' || value === 'kaixuan-kxpms'
+}
 
 function asPresetId(value: unknown): KaixuanPresetId | null {
   if (value === null || value === undefined) {
@@ -33,7 +36,7 @@ function asPresetId(value: unknown): KaixuanPresetId | null {
   if (typeof value !== 'string') {
     throw new Error(`presetId must be a string or null, got ${typeof value}`)
   }
-  if (Object.hasOwn(KAIXUAN_PRESETS, value)) {
+  if (isKnownPresetId(value)) {
     return value
   }
   throw new Error(`unknown presetId: ${value}`)

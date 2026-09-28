@@ -1,14 +1,28 @@
-// What: AccountsPane 里的 kaixuan provider 预设 section。
-// 一键启用 / 关闭 Codex / ClaudeCode / OpenCode 上的 kaixuan 端点（local 或 kxpms）。
+// What: AccountsPane 里的 kaixuan provider 预设 section。一键启用 / 关闭
+// Codex / ClaudeCode / OpenCode 上的 kaixuan 端点（local 或 kxpms）。
 //
 // Why: Orca 项目原本不暴露第三方 provider 切换入口。这里用新发明 "preset" 概念
 // 把 IPC handler 暴露到 UI，让用户在 AccountsPane 里勾选 + Apply 即生效。
+//
+// Caveats the UI surfaces (these are NOT just-for-show):
+//  * ClaudeCode walks the Anthropic `/v1/messages` protocol; the kaixuan gateway
+//    upstream (kxpms) is documented as OpenAI Responses only. The ClaudeCode
+//    preset writes the right base URL/auth key, but the user must accept that
+//    runtime requests will 404/501 until the gateway team exposes a compatible
+//    endpoint.
+//  * ClaudeCode's settings.json env block does NOT do shell-style ${VAR}
+//    expansion. If the user does not provide an inline API key we leave
+//    ANTHROPIC_AUTH_TOKEN absent and rely on the user's own shell export (which
+//    ClaudeCode *does* read at startup).
+//  * Codex uses [model_providers.X] + top-level model_provider; the OpenCode CLI
+//    reads provider.<id>.options.{baseURL,apiKey} per opencode.ai/docs/providers.
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
 import { Button } from '../ui/button'
 import { Label } from '../ui/label'
 import { Badge } from '../ui/badge'
+import { Input } from '../ui/input'
 import { SearchableSetting } from './SearchableSetting'
 import {
   KAIXUAN_PRESETS,
@@ -46,6 +60,9 @@ function KaixuanAccountsSection(): React.JSX.Element {
   const [codex, setCodex] = useState<AgentState>(initialAgentState)
   const [claude, setClaude] = useState<AgentState>(initialAgentState)
   const [openCode, setOpenCode] = useState<AgentState>(initialAgentState)
+  // Why: kept only in component state, never persisted. The literal value is
+  // forwarded into the system config on Apply and forgotten on reload.
+  const [apiKeyDraft, setApiKeyDraft] = useState<string>('')
 
   useEffect(() => {
     if (!api) {
@@ -86,6 +103,8 @@ function KaixuanAccountsSection(): React.JSX.Element {
     }
   }, [api])
 
+  const trimmedApiKey = apiKeyDraft.trim()
+
   const applyPreset = useCallback(
     async (
       agentId: ProviderPresetAgentId,
@@ -96,23 +115,20 @@ function KaixuanAccountsSection(): React.JSX.Element {
         return
       }
       applyState({ presetId, busy: true, error: null, configPath: null })
+      const apiKeyArg = trimmedApiKey.length > 0 ? trimmedApiKey : null
       try {
         const result =
           agentId === 'codex'
-            ? await api.applyCodex({ presetId })
+            ? // Codex reads OPENAI_API_KEY from the user's shell; nothing to embed.
+              await api.applyCodex({ presetId })
             : agentId === 'claude'
-              ? await api.applyClaude({ presetId })
-              : await api.applyOpenCode({ presetId })
+              ? await api.applyClaude({ presetId, apiKey: apiKeyArg })
+              : await api.applyOpenCode({ presetId, apiKey: apiKeyArg })
         if (result.error) {
           applyState({ presetId, busy: false, error: result.error, configPath: result.configPath })
           return
         }
-        applyState({
-          presetId,
-          busy: false,
-          error: null,
-          configPath: result.configPath
-        })
+        applyState({ presetId, busy: false, error: null, configPath: result.configPath })
       } catch (error) {
         applyState({
           presetId,
@@ -122,7 +138,7 @@ function KaixuanAccountsSection(): React.JSX.Element {
         })
       }
     },
-    [api]
+    [api, trimmedApiKey]
   )
 
   return (
@@ -137,13 +153,23 @@ function KaixuanAccountsSection(): React.JSX.Element {
         <p className="text-xs text-muted-foreground">
           {translate(
             'auto.components.settings.AccountsPane.kaixuanDescription',
-            'Switch the active model provider for Codex, ClaudeCode, and OpenCode to one of the two Kaixuan gateways. Endpoints live in ~/.codex/config.toml, ~/.claude/settings.json, and ~/.config/opencode/opencode.json respectively; nothing leaves this device. Apply restarts the next CLI session — already-running workers keep using their existing config until they exit.'
+            'Switch the active model provider for Codex, ClaudeCode, and OpenCode to one of the two Kaixuan gateways (local http://127.0.0.1:8782 or remote https://llm.kxpms.cn). Endpoints live in ~/.codex/config.toml, ~/.claude/settings.json, and ~/.config/opencode/opencode.json respectively; nothing leaves this device. Apply restarts the next CLI session — already-running workers keep using their existing config until they exit.'
           )}
         </p>
       </div>
 
+      <div className="flex items-start gap-2 rounded-md border border-annotation-highlight/40 bg-annotation-highlight/5 px-3 py-2 text-xs text-secondary">
+        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          {translate(
+            'auto.components.settings.AccountsPane.kaixuanCaveat',
+            'Read before enabling. The kxpms gateway ships an OpenAI Responses endpoint; ClaudeCode walks the Anthropic /v1/messages protocol. Apply will write the right base URL into ~/.claude/settings.json, but ClaudeCode worker calls may 404/501 against the upstream until the gateway team exposes an Anthropic-compatible route. Codex and OpenCode both speak OpenAI Responses and work as soon as OPENAI_API_KEY is set in the shell that runs the agent.'
+          )}
+        </span>
+      </div>
+
       {!api ? (
-        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive dark:bg-destructive/10">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           <span>
             {translate(
@@ -153,6 +179,44 @@ function KaixuanAccountsSection(): React.JSX.Element {
           </span>
         </div>
       ) : null}
+
+      <SearchableSetting
+        title={translate(
+          'auto.components.settings.AccountsPane.kaixuanApiKeyTitle',
+          'Inline API key (ClaudeCode / OpenCode)'
+        )}
+        description={translate(
+          'auto.components.settings.AccountsPane.kaixuanApiKeyDescription',
+          'Optional. When set, the literal token is written as ANTHROPIC_AUTH_TOKEN into ~/.claude/settings.json and as options.apiKey into ~/.config/opencode/opencode.json. Codex is unaffected — it reads OPENAI_API_KEY from the shell at agent startup. Leave blank if you exported the token in the shell that runs the worker and want ClaudeCode to inherit it.'
+        )}
+        keywords={['kaixuan', 'api', 'key', 'token', 'bearer', 'anthropic', 'openai']}
+        className="space-y-2"
+      >
+        <Label htmlFor="kaixuan-api-key">
+          {translate('auto.components.settings.AccountsPane.kaixuanApiKeyLabel', 'Inline API key')}
+        </Label>
+        <div className="flex gap-2">
+          <Input
+            id="kaixuan-api-key"
+            type="password"
+            value={apiKeyDraft}
+            onChange={(e) => setApiKeyDraft(e.target.value)}
+            placeholder="sk-…"
+            spellCheck={false}
+            className="flex-1"
+          />
+          {apiKeyDraft.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setApiKeyDraft('')}
+              className="h-7 shrink-0"
+            >
+              {translate('auto.components.settings.AccountsPane.kaixuanApiKeyClear', 'Clear')}
+            </Button>
+          ) : null}
+        </div>
+      </SearchableSetting>
 
       <AgentPresetCard
         agentId="codex"
@@ -168,6 +232,10 @@ function KaixuanAccountsSection(): React.JSX.Element {
         )}
         state={claude}
         onApply={(presetId) => applyPreset('claude', presetId, setClaude)}
+        caveat={translate(
+          'auto.components.settings.AccountsPane.kaixuanAgentClaudeCaveat',
+          'Writes ANTHROPIC_BASE_URL into ~/.claude/settings.json. Provide the inline API key above to also embed ANTHROPIC_AUTH_TOKEN — otherwise ClaudeCode must inherit it from the shell that runs it.'
+        )}
       />
       <AgentPresetCard
         agentId="opencode"
@@ -177,6 +245,10 @@ function KaixuanAccountsSection(): React.JSX.Element {
         )}
         state={openCode}
         onApply={(presetId) => applyPreset('opencode', presetId, setOpenCode)}
+        caveat={translate(
+          'auto.components.settings.AccountsPane.kaixuanAgentOpencodeCaveat',
+          'Writes provider.kaixuan-<id> with options.baseURL + options.apiKey. OpenCode uses {env:OPENAI_API_KEY} when the inline key is blank — make sure the shell running opencode has it exported.'
+        )}
       />
     </section>
   )
@@ -185,12 +257,14 @@ function KaixuanAccountsSection(): React.JSX.Element {
 function AgentPresetCard({
   agentLabel,
   state,
-  onApply
+  onApply,
+  caveat
 }: {
   agentId: ProviderPresetAgentId
   agentLabel: string
   state: AgentState
   onApply: (presetId: KaixuanPresetId | null) => void
+  caveat?: string
 }): React.JSX.Element {
   return (
     <SearchableSetting
@@ -261,6 +335,7 @@ function AgentPresetCard({
           variant="ghost"
         />
       </div>
+      {caveat ? <p className="text-xs text-muted-foreground">{caveat}</p> : null}
       {state.error ? <p className="text-xs text-destructive">{state.error}</p> : null}
     </SearchableSetting>
   )

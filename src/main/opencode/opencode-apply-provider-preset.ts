@@ -1,9 +1,12 @@
-// What: 给 OpenCode 系统 config 写 kaixuan preset：
-// presetId 切换 `provider.kaixuan-<id>.baseURL` + `provider.kaixuan-<id>.apiKey`，并把顶层 `model` 设为合适模型。
-// presetId 为 null 时清掉所有 kaixuan provider 条目，把 `model` 复原到用户原有值。
+// What: 给 OpenCode 系统 config 写 kaixuan preset。
+// presetId 写一个 `provider.kaixuan-<id>` 条目，包含 npm / name / options.baseURL / options.apiKey。
+// presetId 为 null 时清掉所有 kaixuan-* provider 条目，其它保留。
 //
 // Why: OpenCode CLI 通过 opencode.json 的 provider map 切换厂商。这里的 `OPENCODE_CONFIG_DIR` 复用了
 // shared/opencode-config-directory.ts 的解析规则——XDG_CONFIG_HOME 优先。
+//
+// Schema 参考 opencode.ai/docs/providers: 每个 provider 条目里 baseURL / apiKey 必须放在 options 子对象下，
+// 不是顶级 — 否则 OpenCode 不会读。
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { KAIXUAN_PRESETS, type KaixuanPresetId } from '../../shared/provider-preset-types'
@@ -20,10 +23,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Pure helper — exposed for testing. */
+/** Pure helper — exposed for testing. Returns the rewritten config and the
+ *  preset's provider key (null when presetId is null). The provider entry
+ *  follows opencode.ai/docs/providers: `{ npm, name, options: { baseURL, apiKey } }`.
+ */
 export function applyKaixuanToOpenCodeConfig(
   config: unknown,
-  presetId: KaixuanPresetId | null
+  presetId: KaixuanPresetId | null,
+  apiKeyPlaceholder = '{env:OPENAI_API_KEY}'
 ): { next: Record<string, unknown>; presetProviderKey: string | null } {
   const next: Record<string, unknown> = isRecord(config) ? { ...config } : {}
   const providerRaw = next.provider
@@ -45,21 +52,26 @@ export function applyKaixuanToOpenCodeConfig(
   if (presetId !== null) {
     const preset = KAIXUAN_PRESETS[presetId]
     presetProviderKey = `kaixuan-${presetId.split('-')[1]}`
+    // Why: OpenCode's schema requires baseURL/apiKey to live under `options`,
+    // not at the top of the provider entry. We use the opencode-documented
+    // `{env:VAR}` placeholder so the user's OPENAI_API_KEY env var resolves at
+    // opencode startup — matches what opencode's /connect flow writes.
     provider[presetProviderKey] = {
+      npm: '@ai-sdk/openai-compatible',
       name: preset.codexProviderName,
-      baseURL: preset.opencodeBaseUrl,
-      apiKey: `\${env:${preset.envKeyName}}`,
-      // OpenCode accepts the OpenAI Responses protocol adapter transparently when
-      // it sees an OpenAI-shaped baseURL; we don't force a model here so the
-      // user's configured `model` field remains the source of truth.
-      npm: '@ai-sdk/openai-compatible'
+      options: {
+        baseURL: preset.opencodeBaseUrl,
+        apiKey: apiKeyPlaceholder
+      }
     }
   }
   next.provider = provider
   return { next, presetProviderKey }
 }
 
-/** Read the active preset id by scanning provider map for kaixuan-* baseURL match. */
+/** Read the active preset id by scanning provider map for kaixuan-* baseURL match.
+ *  Looks at options.baseURL because baseURL lives under options per opencode schema.
+ */
 export function readActiveOpenCodeKaixuanPreset(config: unknown): KaixuanPresetId | null {
   if (!isRecord(config) || !isRecord(config.provider)) {
     return null
@@ -69,14 +81,22 @@ export function readActiveOpenCodeKaixuanPreset(config: unknown): KaixuanPresetI
   for (const id of Object.keys(KAIXUAN_PRESETS) as KaixuanPresetId[]) { // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Object.keys returns string[]; the cast only narrows to the union of known preset ids for the dispatch table.
     const providerKey = `kaixuan-${id.split('-')[1]}`
     const entry = provider[providerKey]
-    if (isRecord(entry) && entry.baseURL === KAIXUAN_PRESETS[id].opencodeBaseUrl) {
+    if (
+      isRecord(entry) &&
+      isRecord(entry.options) &&
+      entry.options.baseURL === KAIXUAN_PRESETS[id].opencodeBaseUrl
+    ) {
       return id
     }
   }
   return null
 }
 
-/** Apply or remove the kaixuan preset on disk. */
+/** Apply or remove the kaixuan preset on disk.
+ *  Why: when caller supplies an explicit apiKey, we override the placeholder; this is
+ *  the Orca-side equivalent of running `opencode auth set <id> <token>` from the
+ *  shell before invoking the agent.
+ */
 export function applyOpenCodeKaixuanPreset(
   presetId: KaixuanPresetId | null,
   options?: { apiKey?: string | null; environment?: NodeJS.ProcessEnv }
@@ -93,18 +113,9 @@ export function applyOpenCodeKaixuanPreset(
         current = {}
       }
     }
-    const { next } = applyKaixuanToOpenCodeConfig(current, presetId)
-    if (presetId !== null && options?.apiKey) {
-      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: applyKaixuanToOpenCodeConfig returned Record for next.provider; this widens for the apiKey mutation only.
-      const provider: Record<string, Record<string, unknown>> = next.provider as Record<
-        string,
-        Record<string, unknown>
-      >
-      const providerKey = `kaixuan-${presetId.split('-')[1]}`
-      if (provider[providerKey]) {
-        provider[providerKey].apiKey = options.apiKey
-      }
-    }
+    const apiKeyPlaceholder =
+      options?.apiKey && options.apiKey.length > 0 ? options.apiKey : '{env:OPENAI_API_KEY}'
+    const { next } = applyKaixuanToOpenCodeConfig(current, presetId, apiKeyPlaceholder)
     writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8')
     return { agentId: 'opencode', configPath, presetId, error: null }
   } catch (error) {

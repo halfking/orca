@@ -31,12 +31,23 @@ describe('claude-apply-provider-preset', () => {
     delete process.env.CLAUDE_CONFIG_DIR
   })
 
-  it('injects ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN on apply', () => {
+  it('writes only ANTHROPIC_BASE_URL when no apiKey is supplied (no shell-style ${VAR} literals)', () => {
     const result = applyClaudeKaixuanPreset('kaixuan-local')
     expect(result.error).toBeNull()
     const written = JSON.parse(readFileSync(result.configPath, 'utf-8'))
     expect(written.env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:8782')
-    expect(written.env.ANTHROPIC_AUTH_TOKEN).toContain('OPENAI_API_KEY')
+    expect(written.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
+    // Why: ClaudeCode does not expand `${VAR}` inside the env block. Anything
+    // string-form would be sent verbatim as the bearer token, causing a 401.
+    expect(JSON.stringify(written.env)).not.toContain('${OPENAI_API_KEY}')
+  })
+
+  it('writes the literal apiKey as ANTHROPIC_AUTH_TOKEN when supplied', () => {
+    const result = applyClaudeKaixuanPreset('kaixuan-kxpms', { apiKey: 'sk-test-1234' })
+    expect(result.error).toBeNull()
+    const written = JSON.parse(readFileSync(result.configPath, 'utf-8'))
+    expect(written.env.ANTHROPIC_BASE_URL).toBe('https://llm.kxpms.cn')
+    expect(written.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-test-1234')
   })
 
   it('preserves unrelated env keys', () => {
