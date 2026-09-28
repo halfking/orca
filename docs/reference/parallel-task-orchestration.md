@@ -1,0 +1,305 @@
+# 并行任务编排：隔离、同步、审计、合并与调度路径可见性
+
+本文回答一个具体问题：**在 Orca 上并行推进多个任务，怎样让它们互不干扰、同步推进、各自独立审计与测试、最后安全合并，并且让每一条调度路径都可查。**
+
+所有结论都基于本仓库代码与本机 `orca` CLI 实测（`orca` 1.4.197，`agent-context` 报告 237 条命令）。命令与文件证据见文末附录。
+
+---
+
+## 0. 结论摘要
+
+**Orca 上游已经具备大半机制底座**：Run / Task / Dispatch 三级生命周期、git worktree 级放置、`--agent` + `--model` + `--effort` 的每 worker 模型路由、`--deps` 依赖 DAG、`gate-create` 决策门禁、stale-base 漂移保护。**需求 R1（隔离）、R2（同步）、R5（模型路由）不需要新造轮子。**
+
+**三个真实缺口**：
+
+| 缺口 | 性质 | 证据 |
+| --- | --- | --- |
+| 审计 / 测试角色无原生约束 | 编排层没有 verdict、reviewer、merge 任何原语 | 237 条命令中无 merge/audit/verdict 动词 |
+| 合并无原语、无门禁 | 并行推进的终点（合并）完全没有被建模 | 同上；仅有 dispatch 期 stale-base 保护 |
+| 调度路径无单一视图、无历史账本 | 状态是"当前快照"，不是"决策路径" | DB 无事件表；`worker-start` 收据只在调用瞬间返回 |
+
+**方案分五层**，其中只有 L3（可见性）与 L4（合并）需要新建：
+
+```
+L0 规程层  Task spec 契约 + 角色模型矩阵 + 合并协议      —— 文档即代码
+L1 编排层  run-create / task-create --deps / worker-start 并行波   —— 现有 CLI
+L2 门禁层  gate-create / gate-resolve 阻断波次推进                —— 现有 CLI
+L3 可见性层 调度账本（append-only）+ 单命令调度视图 + 写集冲突分析   —— 需新建
+L4 合并层  合并协议 + 合并脚本（rebase → 回归 → 合入 → 冲突）      —— 需新建
+```
+
+---
+
+## 1. 需求拆解
+
+把原始需求拆成六条原子需求，每条给出**可验收判据**（不满足判据就不算达成）：
+
+| # | 原子需求 | 可验收判据 |
+| --- | --- | --- |
+| R1 | 多个任务并行推进时互不干扰 | 每个并行任务有独立工作区；写集（will-edit files）两两不交或已知重叠；共享副作用（端口/容器/DB）被显式分配 |
+| R2 | 同步推进 | 任务之间用 `--deps` 建模；波次边界显式；"谁在等谁"可枚举，无隐藏阻塞 |
+| R3 | 分别的审计与测试 | 审计与测试是**独立 Dispatch**，独立上下文、独立模型；审计者对实现分支**只读**；每个任务产出一条机器可判定的 verdict |
+| R4 | 合并 | 合并顺序由写集重叠度与 verdict 决定；合并前 rebase 到最新基线；合并后跑回归；冲突有明确归属人 |
+| R5 | 不同角色用不同模型 | 角色→(agent, model, effort) 矩阵事先声明，落进调度记录；实际生效值以 `launch.effective` 为准，不以请求参数为准 |
+| R6 | 所有调度路径可见 | 从 Run 到最终合并的每一次调度决策可**逐条枚举**，含：谁派谁、什么角色、什么模型、放哪个 worktree、基线是什么、当前状态、下一步命令、证据出处 |
+
+**R6 的关键区分**：状态 ≠ 路径。Orca 现在能回答"现在到哪了"（状态），但回答不了"为什么是这个模型/为什么放这个 worktree/谁先合谁后合"（路径）。后者才是合并与复盘真正需要的。
+
+---
+
+## 2. 现状盘点
+
+### 2.1 已经有的（不要重造）
+
+| 需求 | Orca 机制 | 证据 |
+| --- | --- | --- |
+| R1 隔离 | `--worktree new-child` / `new-top-level` / `current` / `<selector>`，每 worker 独立 git worktree 与终端 | `orca orchestration worker-start --help`；`src/main/runtime/rpc/methods/orchestration/worker/worker-worktree-creation.ts` |
+| R2 同步 | `--deps <json_array>` 依赖；Task 状态机 `pending/ready/dispatched/completed/failed/blocked/circuit_broken`；`task-list --ready` | `db/lifecycle-transition.ts:67,81`；`worker/task-deps-argument.ts` |
+| R2 门禁 | `gate-create` / `gate-resolve` / `gate-list`，按 Task 阻断 | `rpc/methods/orchestration/gates/gates.ts` |
+| R5 模型路由 | `--agent claude\|codex\|cursor\|antigravity\|muse\|zcode\|opencode\|opencode2` + `--model <id>` + `--effort <level>` | `worker/worker-launch-preferences.ts` |
+| R2 漂移 | 基线落后 > 20 commit 拒绝派发；spec 内 `allow-stale-base: true` 可覆盖 | `coordinator-stale-base-flag.ts:4,6`；`coordinator-task-dispatch.ts:82-91` |
+| 状态可查 | `run-show` / `task-list` / `dispatch-show` / `worker-list` / `worker-show` / `gate-list`，均可 `--json` | `orca orchestration --help` |
+| 存活判据 | `live` / `unverifiable` / `exited` 三态；`projection.attention` + 字面 `projection.nextAction` argv | `worker/worker-list-projection.ts` |
+
+**记录能力的底子已经有了**：`worker_dispatches` 表存 `start_options`(JSON)、`effects`(JSON)、`residual_resources`(JSON)、`stage`、`worktree_id`、`agent_terminal_handle`（`db/schema/create-core-tables-sql.ts:144-162`）。也就是说**每次调度的原始参数已经落库**——只是没有任何命令把它们按"路径"呈现出来。这是 L3 成本低的原因。
+
+### 2.2 缺的
+
+1. **没有 merge / audit / verdict / review 任何原语**。`orca agent-context --json` 全量扫描 237 条命令，与 merge/audit/verdict 相关的只有 `worktree rm` 和一条在说明里提到 review 的 `orchestration send`。合并这件事在上游编排模型里根本不存在——Run 的终点是"所有 Dispatch 结算"，不是"变更合入基线"。
+2. **审计没有独立性约束**。上游 `coordinator-loop.md` 只写了"review-only `worker_done` 授权综合发现，不授权协调者改文件"，这是一条**纪律**，不是机制。
+3. **没有历史事件流**。DB 里有当前状态快照与 `mutation_receipts`，但没有 append-only 的调度事件表。
+4. **没有写集冲突分析**。`worker_done --files-modified` 提供了原料，但没人计算任务两两之间的文件重叠，也就没人据此决定合并顺序。
+
+### 2.3 一个容易被忽略的上游约束
+
+`--model` / `--effort` **只对 claude / codex / cursor / antigravity / muse 生效**，opencode 与 zcode 拒绝 `--model`，跑自己 config 里的模型；`--effort` 必须配 `--model`，且两者都不能与 `--terminal` 组合。这意味着**模型矩阵不能写成"角色 → 任意模型"的自由映射**，必须按 agent 分支声明。上游另有纪律：只在用户点名模型时才传 `--model`，否则继承用户默认——矩阵要显式声明才传。
+
+---
+
+## 3. 失效模式：并行为什么会不可靠
+
+方案必须逐条对上这些失效模式，否则只是"看起来有流程"。
+
+| # | 失效模式 | 后果 | 防线 |
+| --- | --- | --- | --- |
+| F1 | 两个 worker 共用同一个 worktree | 编辑交错、diff 混合、丢改动 | 一任务一 worktree（`new-child`） |
+| F2 | 各自 worktree 但共享依赖目录 / 端口 / 容器 / DB | 测试互相污染，绿红交替 | spec 里显式分配端口与外部资源名；并行波次必须先定资源表 |
+| F3 | 各自 worktree 但基线不同 | 合并冲突，甚至静默错误 | `--base-branch` 显式钉基线；落后 > 20 commit 拒绝派发 |
+| F4 | 写集重叠但无人知晓 | 合并顺序随机选，冲突成本集中爆发 | 从 `worker_done --files-modified` 算两两写集交集，产出合并顺序 |
+| F5 | 审计者就是编码者（或共享上下文） | 自己盖章，审计退化为复读 | 审计是**另一个 worktree / 另一个 Dispatch** 的只读角色，模型与编码者不同档 |
+| F6 | 测试由编码者自己写自己验 | 测试随实现漂移，等价于没测 | 测试角色独立 Dispatch，允许低成本模型；测试必须先红后绿 |
+| F7 | 模型路由隐式（协调者随手挑） | 成本不可控、质量不可解释、无法复盘 | 角色矩阵事先声明，落进调度记录，事后按 `launch.effective` 审计 |
+| F8 | 调度路径不可见 | 出问题只能靠翻 transcript；无法回答"为什么它这么跑" | 调度账本 + 单命令视图 |
+
+---
+
+## 4. 方案设计
+
+### 4.1 四条原则
+
+1. **隔离靠机制，不靠自觉**：并行任务默认分配独立 worktree；写集在 spec 里声明，冲突在派发前就能算出来。
+2. **同步靠 DAG + 门禁，不靠轮询等待**：依赖用 `--deps` 声明，跨波次推进用 gate 阻断，`--ready` 是唯一事实来源。
+3. **编码 / 测试 / 审计三分角色**：三种角色三种模型档位，互不复用上下文，审计者对实现分支只读。
+4. **调度路径是一等公民数据**：每一次调度决策都必须落成可枚举记录，合并顺序、复盘、成本归因都从这份记录推导，而不是从记忆推导。
+
+### 4.2 角色—模型矩阵
+
+模型档位（`T`=最强推理 / `S`=最强编码 / `C`=低成本），agent 限定在上游真正支持 `--model` 的集合内：
+
+| 角色 | agent | model | effort | 写权限 | 放置 | 说明 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `coordinator` | 用户当前会话 | — | — | 只编排，不改实现文件 | `current` | 不做实现 |
+| `implementer` | codex | S | high | 可写自己的 worktree | `new-child` | 主力编码档 |
+| `test-author` | claude | C | medium | 只写测试文件 | `new-child` | 低价档，允许改测试不改实现 |
+| `auditor` | claude | T | high | **只读** | `new-child`（检出实现分支） | 独立上下文，禁止修改 |
+| `merger` | coordinator 执行协议 | — | — | 在基线 worktree 合并 | `current` | 合并是确定性动作，不交给模型自由发挥 |
+
+**约束**：上游纪律要求"用户没点名模型就不传 `--model`"。所以矩阵是**声明式**的——先由用户/项目确认这张表，确认后才在派发时显式传 `--model/--effort`；未确认时继承 agent 默认，绝不静默挑一个。
+
+### 4.3 隔离模型
+
+```
+base worktree (main)                     ← 协调者 + 合并者，唯一允许合入的地方
+├── new-child  task-1/<slug>             ← implementer-A，只写自己的写集
+├── new-child  task-2/<slug>             ← implementer-B，写集与 A 不交
+├── new-child  task-2/audit              ← auditor-B，只读检出 task-2 分支
+└── new-child  task-1/audit              ← auditor-A，只读检出 task-1 分支
+```
+
+每条 Task spec 的强制字段（扩上游 Task-spec 契约）：
+
+- **Target**：组件/文件范围
+- **Change**：要产出的具体结果
+- **Constraints**：不变量、兼容边界、禁改区
+- **Ownership**：本任务可写的文件清单（写集）+ 外部资源分配（端口/容器/DB 名）
+- **Baseline**：`--base-branch` 的 ref
+- **Observable acceptance**：可机器判定的验收（命令 + 期望输出）
+- **Portability note**（仅测试角色）：必须先看到红再看到绿
+
+### 4.4 DAG 模板（五波）
+
+```text
+wave 0  plan          coordinator 拆任务、分配写集与资源、定角色模型矩阵
+wave 1  implement     implementer × N   并行，deps=[]        （new-child，互不干扰）
+wave 2  self-test     test-author × N    deps=[impl]         低价档，只写测试
+wave 3  audit         auditor × N        deps=[impl, test]   只读，产出 verdict
+wave 4  merge         merger             deps=[audit]        串行，按写集重叠度排序
+```
+
+命令骨架：
+
+```text
+orca orchestration run-create --objective "<目标>" --json
+
+# wave 1
+orca orchestration task-create --spec "<impl spec>" --task-title "impl-1" --deps '[]' --json
+orca orchestration worker-start --task <impl_task> \
+  --worktree new-child --name task-1 --base-branch main \
+  --agent codex --model <S> --effort high --json
+
+# wave 3 审计（独立 worktree，只读检出实现分支）
+orca orchestration task-create --spec "<audit spec>" --task-title "audit-1" \
+  --deps '["<impl_task>","<test_task>"]' --json
+orca orchestration worker-start --task <audit_task> \
+  --worktree new-child --name task-1-audit --base-branch <impl branch> \
+  --agent claude --model <T> --effort high --json
+
+# 门禁：审计未 pass 则合并波次不启动
+orca orchestration gate-create --task <merge_task> \
+  --question "audit-1 verdict = pass ?" --options '["pass","fail"]' --json
+```
+
+### 4.5 审计协议（verdict 契约）
+
+审计 worker 的 `worker_done` 必须给出机器可判定的结论，而不是散文：
+
+```
+verdict: pass | pass_with_findings | fail
+findings: <n>            每条含 file:line、严重级、可复现证据
+regression: <命令> → <实际输出>
+blockers: [...]
+```
+
+- `fail` → 该 Task 的 merge Task 被 gate 阻断，走修复 → 重审（`--retry-of <dispatch_id>`，重跑时必须重复原 worktree/agent 选择，不继承放置）。
+- `pass_with_findings` → 归入"下一 owner"清单（上游 `coordinator-loop.md` 明确：review-only 的 `worker_done` 只授权综合发现，不授权协调者改文件；修复要么派工，要么明确交给用户）。
+- **审计者禁止修改实现文件**——发现问题的动作是产出 finding，不是自己修。
+
+### 4.6 合并协议
+
+1. **收集**：所有 Task 的 `worker_done --files-modified` → 写集。
+2. **排序**：计算写集两两交集 → 重叠度矩阵 → 决定合并顺序（重叠少的先合，把冲突面压到最小），冲突对单独走人工。
+3. **前置校验**：verdict 必须 `pass` 或 `pass_with_findings`；gate 必须 resolved。
+4. **rebase**：每个实现分支 rebase 到**当前**基线（不是派发时的基线）。Orca 的 stale-base 阈值 20 只保护派发期，合并期必须重新校验。
+5. **合入 + 回归**：每合一个跑一次受影响测试；全量回归在最后一个。
+6. **归属**：冲突不自动解。冲突落到明确的 owner（通常是该 Task 的 implementer，走 `--retry-of` 或新 Task）。
+
+### 4.7 调度路径可见性（L3，本方案的核心新增）
+
+**调度账本（append-only）**：每个 Run 一份 JSONL，追加而非覆盖，每条是一个调度决策：
+
+```json
+{
+  "ts": "...", "wave": 3, "task": "task_...", "dispatch": "task_...",
+  "role": "auditor", "agent": "claude", "model": "...", "effort": "high",
+  "placement": { "worktree": "task-1-audit", "base": "feature/task-1", "isolation": "worktree" },
+  "state": "ready", "stage": "accepted", "liveness": "live",
+  "next_action": ["orca", "orchestration", "worker-show", "--dispatch", "task_...", "--json"],
+  "evidence": { "files_modified": ["src/a.ts"], "report_path": "..." },
+  "verdict": null, "gate": null
+}
+```
+
+来源全部是现有 CLI 的 `--json` 收据，不新增运行时状态：
+
+- `worker-start --json` 收据（含 `start_options` 等价信息、`effects`、`failedStage`、`recovery`）
+- `worker-list --json`（`projection.liveness` / `projection.attention` / `projection.nextAction`）
+- `gate-create/gate-resolve --json`
+- `worker_done` 投递里的 `--files-modified` / `--report-path` / `--outcome`
+
+**单命令调度视图**：一条命令回答四个问题——
+
+1. **现在到哪了**：Run → Task → Dispatch 树，每个节点带状态、角色、模型、放置、存活。
+2. **谁在等谁**：DAG 依赖边 + 未满足的 gate。
+3. **现在能做什么**：把每个"现在可执行"的步骤还原成可直接粘贴的 argv。
+4. **合并没有风险吗**：写集重叠矩阵、verdict 汇总、建议合并顺序、冲突对。
+
+这条视图同时是**审计工具**：R6 的"路径可见"与 R4 的"合并决策"共用同一份数据，不存在两套真相。
+
+#### 4.7.1 已实现：`config/scripts/orchestration-schedule-ledger.mjs`
+
+一个零依赖 Node ESM 脚本，两个子命令：
+
+```text
+# 记录：单条或批量（每行一条 JSON）
+node config/scripts/orchestration-schedule-ledger.mjs record --run <run_id> \
+  --entry '{"task":"impl_a","event":"worker-start","role":"implementer","agent":"codex",
+            "model":"gpt-5.5","effort":"high",
+            "placement":{"worktree":"task-a","base":"main"},"state":"dispatched"}'
+
+# 查看：一条命令回答四个问题
+node config/scripts/orchestration-schedule-ledger.mjs view --ledger <path>
+node config/scripts/orchestration-schedule-ledger.mjs view --ledger <path> --json
+```
+
+视图固定输出六段：`SCHEDULING PATH`（按 DAG 深度分波的调度树）、`BLOCKING`（未满足依赖与未决门禁）、`ACTIONABLE NOW`（当前可执行步骤的直接 argv）、`WRITE-SET OVERLAP`（两两写集重叠矩阵与需指派的冲突对）、`SUGGESTED MERGE ORDER`（少冲突优先）、`ROLE COVERAGE`（角色模型矩阵覆盖情况）。
+
+设计约束（都是踩过的坑）：
+
+- **账本是 append-only JSONL**，默认落在 `<cwd>/.orca/orchestration-ledger/<run>.jsonl`；只消费 `orca ... --json` 收据，不改运行时。
+- **波次由 DAG 推导，不采信记录值**——`wave = 1 + max(dep.wave)`，避免手写 wave 与真实依赖漂移。
+- **未知即阻断**：依赖未出现在账本里按"未满足"处理，fail closed。
+- **合并队列只收可落地任务**：`coordinator` / `auditor` / `merger` 不进入合并顺序；**写集未记录的可落地任务排最后**——未知不等于小。
+- 覆盖测试见 `config/scripts/orchestration-schedule-ledger.test.mjs`（17 例，覆盖解析失败、折叠、DAG 波次、门禁、写集矩阵、合并顺序、渲染）。
+
+---
+
+## 5. 执行阶段
+
+| 阶段 | 内容 | 验收标准 | 状态 |
+| --- | --- | --- | --- |
+| P0 | 本文档 + `.gitignore` 放行 + AGENTS.md 挂链 | 文档可被 git 跟踪，AGENTS.md 可跳转 | ✅ 完成 |
+| P1 | **L3 可见性**：调度账本记录器 + 单命令调度视图 | 合成 Run 数据产出完整视图：树、DAG 阻塞、argv、写集重叠矩阵 | ✅ 完成（17/17 测试 + CLI 端到端 + lint/format） |
+| P2 | **L0/L1 规程落地**：角色矩阵 + Task spec 模板 + 五波命令骨架脚本 | 能对一个新目标一键生成五波编排命令（含写集与资源分配） | 待定 |
+| P3 | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | 对真实分支执行一次完整合并，冲突被显式报告而非静默处理 | 待定 |
+| P4 | **真实 pilot**：在本仓库用两个真实任务跑完整链路 | 两个任务零互相干扰、各自出 verdict、按建议顺序合并、账本可复盘 | 待定（需授权） |
+
+**风险与边界**
+
+- 真实 pilot 需要启动 Orca app、创建多个 worktree、消耗模型额度，属于需要明确授权的动作。
+- 改 Orca 源码补 merge/audit 原语属于 PR 级工程，不在默认路径内；本方案默认走"规程 + 工具"路线，不改上游运行时。
+- 上游纪律"只在用户点名模型时传 `--model`"与角色矩阵存在张力，解法是矩阵需显式确认后才生效。
+
+---
+
+## 附录 A：命令速查
+
+```text
+orca status --json                                   # 运行时可用性
+orca orchestration run-create --objective "<目标>" --json
+orca orchestration task-create --spec "<spec>" --deps '[]' --json
+orca orchestration task-list --ready --brief --json  # 唯一事实来源
+orca orchestration worker-start --task <id> --worktree new-child --name <n> \
+    --base-branch <ref> --agent codex --model <id> --effort high --json
+orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
+orca orchestration worker-list --run <id> --terminal-state reclaimable --json
+orca orchestration gate-create --task <id> --question "<q>" --options '["pass","fail"]' --json
+orca orchestration gate-resolve --gate <id> --choice pass --json
+orca orchestration worker-release --dispatch <id> --json
+```
+
+## 附录 B：证据索引
+
+| 结论 | 文件 |
+| --- | --- |
+| Task 状态机 | `src/main/runtime/orchestration/db/lifecycle-transition.ts:67,81` |
+| Dispatch 状态机与 `start_options`/`effects` | `src/main/runtime/orchestration/db/schema/create-core-tables-sql.ts:144-162` |
+| stale-base 阈值 20 与 `allow-stale-base` | `src/main/runtime/orchestration/coordinator-stale-base-flag.ts:4,6` |
+| stale-base 拒绝派发路径 | `src/main/runtime/orchestration/coordinator-task-dispatch.ts:82-91` |
+| worktree 创建 | `src/main/runtime/rpc/methods/orchestration/worker/worker-worktree-creation.ts` |
+| 模型/effort 生效值 | `.../worker/worker-launch-preferences.ts` |
+| 依赖解析 | `.../worker/task-deps-argument.ts` |
+| 门禁 | `src/main/runtime/rpc/methods/orchestration/gates/gates.ts` |
+| 存活投影 | `.../worker/worker-list-projection.ts` |
+| 无 merge/audit 原语 | `orca agent-context --json` 全量 237 命令扫描 |
+| 模型档位限制 | `orca skills get orchestration --reference references/coordinator-loop.md` |
+| 放置与 worktree 语义 | `orca skills get orchestration --reference references/placement-and-remote.md` |
