@@ -35,9 +35,8 @@ export type ProviderPresetDefinition = {
   /** Unique id within the registry.
    *  - Built-in: 'kaixuan-local' / 'kaixuan-kxpms'.
    *  - Custom: any user-chosen string. The apply functions use this verbatim
-   *    as the Codex [model_providers.<id>] table key and the OpenCode
-   *    provider.<id> map key, so it must satisfy both TOML table-header
-   *    and JSON object-key rules (no '.', no leading whitespace, etc.).
+   *    as the Codex `[model_providers."<id>"]` table key (quoted, so dots are
+   *    fine) and the OpenCode provider.<id> map key.
    *    Validation lives in renderer form validation; the main process trusts
    *    whatever the renderer hands it. */
   id: string
@@ -128,11 +127,11 @@ const SAFE_ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
 /** True when `id` can be embedded in a TOML header / quoted value, a JSON key
  *  and a regex alternation without corrupting any of them.
  *
- *  What it does NOT cover: `[model_providers.<id>]` is written unquoted, so an
- *  id containing `.` is read by TOML as a nested table and Codex then cannot
- *  resolve `model_providers["glm-5.2"]`. OpenCode and the registry itself are
- *  fine with dots. Fixing that means quoting the table header in
- *  codex-apply-provider-preset.ts — tracked as a known gap, not guarded here. */
+ *  A `.` is allowed because the Codex table header is written QUOTED
+ *  (`[model_providers."glm-5.2"]`), which TOML 1.0 reads as the single flat key
+ *  `glm-5.2`. Unquoted, the same id aborted codex-cli 0.158.0 at config load
+ *  with "model_providers.glm-5: provider name must not be empty", which is why
+ *  the documented v4 UI example `glm-5.2` used to be unapplicable. */
 export function isProviderPresetIdInterpolationSafe(id: string): boolean {
   return INTERPOLATABLE_PROVIDER_ID_PATTERN.test(id)
 }

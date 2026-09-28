@@ -39,6 +39,20 @@ function joinTomlBlocks(blocks: string[]): string {
   return blocks.filter((block) => block.length > 0).join('\n')
 }
 
+/** Render the `[model_providers.<id>]` table header with the id QUOTED.
+ *
+ *  Why quoted: an unquoted bare key cannot contain a `.`, so a dotted id — the
+ *  v4 UI's own suggested example is `glm-5.2` — is parsed by TOML as a nested
+ *  table (`model_providers.glm` → `2`). Codex then has no `model_providers`
+ *  entry for the id the top-level `model_provider` names and cannot resolve the
+ *  provider at all, even though the config parses without error. TOML 1.0
+ *  allows quoted keys, so quoting makes every registry id land as one flat key.
+ *  The strip regex must therefore also accept the unquoted spelling, because
+ *  configs written by earlier Orca versions (and by hand) are still on disk. */
+function renderModelProvidersHeader(id: string): string {
+  return `[model_providers."${escapeTomlBasicString(id)}"]`
+}
+
 /** Render `[model_providers.<id>]` table content for the given provider.
  *
  *  @param apiKey  when present, the caller's literal bearer token is written as
@@ -46,9 +60,9 @@ function joinTomlBlocks(blocks: string[]): string {
  */
 function renderProviderTable(provider: ProviderPresetDefinition, apiKey?: string | null): string {
   const lines = [
-    `[model_providers.${provider.modelProviderName}]`,
-    `name = "${provider.codexProviderName}"`,
-    `base_url = "${provider.codexBaseUrl}"`
+    renderModelProvidersHeader(provider.modelProviderName),
+    `name = "${escapeTomlBasicString(provider.codexProviderName)}"`,
+    `base_url = "${escapeTomlBasicString(provider.codexBaseUrl)}"`
   ]
   if (typeof apiKey === 'string' && apiKey.length > 0) {
     // Why the inline token replaces env_key instead of joining it: codex resolves
@@ -86,13 +100,17 @@ function buildModelProviderLineRegex(knownIds: ReadonlySet<string>): RegExp {
   return new RegExp(`^['"]?model_provider['"]?\\s*=\\s*['"](${ids})['"]`)
 }
 
-/** Build the regex that matches `[model_providers.<id>]` table headers. */
+/** Build the regex that matches `[model_providers.<id>]` table headers.
+ *
+ *  Accepts the quoted spelling this module now writes AND the unquoted one that
+ *  earlier versions (and hand-written configs) left on disk, so switching
+ *  providers still removes the previous table instead of leaving a stale one. */
 function buildModelProviderSectionRegex(knownIds: ReadonlySet<string>): RegExp {
   if (knownIds.size === 0) {
     return /^a^/u
   }
   const ids = [...knownIds].map((id) => escapeRegex(id)).join('|')
-  return new RegExp(`^\\[model_providers\\.(${ids})\\]$`)
+  return new RegExp(`^\\[model_providers\\.(?:"(?:${ids})"|'(?:${ids})'|${ids})\\]$`)
 }
 
 function escapeRegex(value: string): string {

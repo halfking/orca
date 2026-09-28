@@ -17,6 +17,7 @@ const {
 const { KAIXUAN_PRESETS, BUILT_IN_PROVIDER_IDS } =
   await import('../../shared/provider-preset-types')
 import type { ProviderPresetDefinition } from '../../shared/provider-preset-types'
+import { parseTomlTableHeaderPath } from './config-toml-key-path'
 
 // A custom provider used in the v4 tests. Mirrors the GLM-5.2 setup in
 // docs/site/content/docs/agents/glm-agent.mdx so the test exercises the same
@@ -56,7 +57,7 @@ describe('codex-apply-provider-preset', () => {
     expect(result.configPath).toBe(configPath)
     const written = readFileSync(configPath, 'utf-8')
     expect(written).toContain('model_provider = "kaixuan-local"')
-    expect(written).toContain('[model_providers.kaixuan-local]')
+    expect(written).toContain('[model_providers."kaixuan-local"]')
     expect(written).toContain('base_url = "http://127.0.0.1:8782/v1"')
     expect(written).toContain('wire_api = "responses"')
   })
@@ -84,7 +85,7 @@ describe('codex-apply-provider-preset', () => {
     expect(written).toContain('[agents.reviewer]')
     expect(written).toContain('config_file = "reviewer.toml"')
     expect(written).toContain('model_provider = "kaixuan-kxpms"')
-    expect(written).toContain('[model_providers.kaixuan-kxpms]')
+    expect(written).toContain('[model_providers."kaixuan-kxpms"]')
     expect(written).toContain('base_url = "https://llm.kxpms.cn/v1"')
   })
 
@@ -93,9 +94,9 @@ describe('codex-apply-provider-preset', () => {
     applyCodexKaixuanPreset('kaixuan-local')
     applyCodexKaixuanPreset('kaixuan-kxpms')
     const written = readFileSync(configPath, 'utf-8')
-    expect((written.match(/\[model_providers\.kaixuan-/g) ?? []).length).toBe(1)
-    expect(written).toContain('[model_providers.kaixuan-kxpms]')
-    expect(written).not.toContain('[model_providers.kaixuan-local]')
+    expect((written.match(/\[model_providers\."kaixuan-/g) ?? []).length).toBe(1)
+    expect(written).toContain('[model_providers."kaixuan-kxpms"]')
+    expect(written).not.toContain('[model_providers."kaixuan-local"]')
   })
 
   it('removes all kaixuan artifacts when presetId is null', () => {
@@ -195,10 +196,10 @@ describe('codex-apply-provider-preset', () => {
     expect(result.providerId).toBe('glm-5.2')
     const written = readFileSync(configPath, 'utf-8')
     expect(written).toContain('model_provider = "glm-5.2"')
-    expect(written).toContain('[model_providers.glm-5.2]')
+    expect(written).toContain('[model_providers."glm-5.2"]')
     expect(written).toContain('base_url = "https://api.z.ai/api/coding/paas/v4"')
     // The custom table must not be confused with a built-in.
-    expect(written).not.toContain('[model_providers.kaixuan-')
+    expect(written).not.toContain('[model_providers."kaixuan-')
   })
 
   it('switching from built-in to custom removes the built-in table and replaces it', () => {
@@ -206,8 +207,8 @@ describe('codex-apply-provider-preset', () => {
     applyCodexProvider(GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
     const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
     expect(written).toContain('model_provider = "glm-5.2"')
-    expect(written).toContain('[model_providers.glm-5.2]')
-    expect(written).not.toContain('[model_providers.kaixuan-local]')
+    expect(written).toContain('[model_providers."glm-5.2"]')
+    expect(written).not.toContain('[model_providers."kaixuan-local"]')
     expect(written).not.toMatch(/^model_provider\s*=\s*"kaixuan-/m)
   })
 
@@ -225,8 +226,8 @@ describe('codex-apply-provider-preset', () => {
     applyCodexProvider(kimiProvider, registry)
     const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
     expect(written).toContain('model_provider = "kimi-k2"')
-    expect(written).toContain('[model_providers.kimi-k2]')
-    expect(written).not.toContain('[model_providers.glm-5.2]')
+    expect(written).toContain('[model_providers."kimi-k2"]')
+    expect(written).not.toContain('[model_providers."glm-5.2"]')
   })
 
   it('readActiveCodexProvider resolves the active id when known to the registry', () => {
@@ -254,8 +255,8 @@ describe('codex-apply-provider-preset', () => {
     const result = applyCodexProvider(null, KNOWN_BUILT_IN_AND_GLM)
     expect(result.providerId).toBeNull()
     const written = readFileSync(configPath, 'utf-8')
-    expect(written).not.toContain('[model_providers.glm-5.2]')
-    expect(written).not.toContain('[model_providers.kaixuan-')
+    expect(written).not.toContain('[model_providers."glm-5.2"]')
+    expect(written).not.toContain('[model_providers."kaixuan-')
     expect(written).not.toMatch(/^model_provider\s*=\s*"(glm|kaixuan)-/m)
   })
 
@@ -264,5 +265,61 @@ describe('codex-apply-provider-preset', () => {
     applyCodexKaixuanPreset('kaixuan-local')
     const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
     expect(written).toContain(`base_url = "${beforeApply.codexBaseUrl}"`)
+  })
+
+  // Why parse the header instead of matching its text: the whole defect is that
+  // `[model_providers.glm-5.2]` is VALID TOML — it just means something else
+  // (`model_providers.glm-5` → `2`). A `toContain` assertion passes against the
+  // broken shape, which is why the suite was green while Codex could not
+  // resolve the provider. parseTomlTableHeaderPath reports what Codex's TOML
+  // layer actually sees.
+  it('a dotted provider id lands as ONE flat model_providers key, not a nested table', () => {
+    const config = renderCodexConfigForProvider('', GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
+    const header = config.split('\n').find((line) => line.startsWith('[model_providers'))
+    expect(header).toBeDefined()
+    const parsed = parseTomlTableHeaderPath(header ?? '')
+    expect(parsed?.segments).toEqual(['model_providers', 'glm-5.2'])
+    expect(parsed?.isArray).toBe(false)
+  })
+
+  it('control: the unquoted header form really does split into a nested table', () => {
+    // Guards the guard — if this ever stops splitting, the assertion above is
+    // no longer proving anything.
+    expect(parseTomlTableHeaderPath('[model_providers.glm-5.2]')?.segments).toEqual([
+      'model_providers',
+      'glm-5',
+      '2'
+    ])
+  })
+
+  it('strips a legacy UNQUOTED table left by an earlier Orca version', () => {
+    // Backward compatibility: configs written before the header was quoted are
+    // still on disk, and a switch must remove them or the stale table lingers.
+    const legacy = [
+      'model_provider = "glm-5.2"',
+      '',
+      '[model_providers.glm-5.2]',
+      'name = "GLM 5.2 (Z.AI)"',
+      'base_url = "https://api.z.ai/api/coding/paas/v4"',
+      ''
+    ].join('\n')
+    const next = renderCodexConfigForProvider(legacy, GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
+    const legacyHeaders = next
+      .split('\n')
+      .filter((line) => line.startsWith('[model_providers.glm-5'))
+    expect(legacyHeaders).toHaveLength(0)
+    expect(next).toContain('[model_providers."glm-5.2"]')
+  })
+
+  it('leaves a user-owned unquoted provider table untouched', () => {
+    const withUser = [
+      '[model_providers.my-own]',
+      'name = "Mine"',
+      'base_url = "https://example.test/v1"',
+      ''
+    ].join('\n')
+    const next = renderCodexConfigForProvider(withUser, GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
+    expect(next).toContain('[model_providers.my-own]')
+    expect(next).toContain('base_url = "https://example.test/v1"')
   })
 })

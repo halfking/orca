@@ -59,12 +59,12 @@ describe('provider-preset-types — preset ids', () => {
     }
   })
 
-  it.fails('KNOWN GAP: an id with a dot still breaks the unquoted Codex table header', () => {
-    // `[model_providers.glm-5.2]` parses as model_providers.glm-5.2 nested
-    // table, so Codex resolves nothing. This is the id the v4 custom-provider
-    // UI suggests, so the defect is reachable. The fix is to quote the header
-    // in codex-apply-provider-preset.ts; flip this to a plain `it` then.
-    expect(isProviderPresetIdInterpolationSafe('glm-5.2')).toBe(false)
+  it('a dotted id is interpolation-safe now that the Codex table header is quoted', () => {
+    // `[model_providers.glm-5.2]` used to parse as a nested table, so codex-cli
+    // 0.158.0 aborted at config load with "model_providers.glm-5: provider name
+    // must not be empty". The header is now written quoted, and the dotted id
+    // the v4 UI suggests lands as one flat key.
+    expect(isProviderPresetIdInterpolationSafe('glm-5.2')).toBe(true)
   })
 
   it('every built-in preset ships interpolation-safe id and modelProviderName values', () => {
