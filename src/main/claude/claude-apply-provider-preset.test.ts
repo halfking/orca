@@ -15,8 +15,26 @@ vi.mock('node:os', async (importOriginal) => {
 import {
   applyKaixuanToClaudeSettings,
   applyClaudeKaixuanPreset,
-  readActiveClaudeKaixuanPreset
+  applyClaudeProvider,
+  applyProviderToClaudeSettings,
+  readActiveClaudeKaixuanPreset,
+  readActiveClaudeProvider
 } from './claude-apply-provider-preset'
+import type { ProviderPresetDefinition } from '../../shared/provider-preset-types'
+
+const GLM_PROVIDER: ProviderPresetDefinition = {
+  id: 'glm-5.2',
+  label: 'GLM 5.2 (Z.AI)',
+  modelProviderName: 'glm-5.2',
+  codexProviderName: 'GLM 5.2 (Z.AI)',
+  codexBaseUrl: 'https://api.z.ai/api/coding/paas/v4',
+  claudeBaseUrl: 'https://api.z.ai/api/coding/paas/v4',
+  opencodeBaseUrl: 'https://api.z.ai/api/coding/paas/v4',
+  envKeyName: 'OPENAI_API_KEY',
+  opencodeModelIds: ['glm-5.2']
+}
+
+const REGISTRY: readonly ProviderPresetDefinition[] = [GLM_PROVIDER]
 
 describe('claude-apply-provider-preset', () => {
   let workingHome: string
@@ -31,14 +49,14 @@ describe('claude-apply-provider-preset', () => {
     delete process.env.CLAUDE_CONFIG_DIR
   })
 
+  // --- v1–v3 behaviour kept green via the wrapper ---
+
   it('writes only ANTHROPIC_BASE_URL when no apiKey is supplied (no shell-style ${VAR} literals)', () => {
     const result = applyClaudeKaixuanPreset('kaixuan-local')
     expect(result.error).toBeNull()
     const written = JSON.parse(readFileSync(result.configPath, 'utf-8'))
     expect(written.env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:8782')
     expect(written.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
-    // Why: ClaudeCode does not expand `${VAR}` inside the env block. Anything
-    // string-form would be sent verbatim as the bearer token, causing a 401.
     expect(JSON.stringify(written.env)).not.toContain('${OPENAI_API_KEY}')
   })
 
@@ -107,5 +125,62 @@ describe('claude-apply-provider-preset', () => {
       readActiveClaudeKaixuanPreset({ env: { ANTHROPIC_BASE_URL: 'https://api.anthropic.com' } })
     ).toBeNull()
     expect(readActiveClaudeKaixuanPreset({})).toBeNull()
+  })
+
+  // --- v4: custom provider registry ---
+
+  it('applyClaudeProvider writes a custom provider baseUrl without disturbing built-ins', () => {
+    const result = applyClaudeProvider(GLM_PROVIDER)
+    expect(result.error).toBeNull()
+    expect(result.providerId).toBe('glm-5.2')
+    const written = JSON.parse(readFileSync(result.configPath, 'utf-8'))
+    expect(written.env.ANTHROPIC_BASE_URL).toBe('https://api.z.ai/api/coding/paas/v4')
+    expect(written.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
+  })
+
+  it('applyClaudeProvider with apiKey embeds the literal token verbatim', () => {
+    const result = applyClaudeProvider(GLM_PROVIDER, { apiKey: 'glm-secret-1234' })
+    expect(result.error).toBeNull()
+    const written = JSON.parse(readFileSync(result.configPath, 'utf-8'))
+    expect(written.env.ANTHROPIC_AUTH_TOKEN).toBe('glm-secret-1234')
+    expect(written.env.ANTHROPIC_BASE_URL).toBe('https://api.z.ai/api/coding/paas/v4')
+  })
+
+  it('switching from a built-in to a custom provider rewrites ANTHROPIC_BASE_URL cleanly', () => {
+    applyClaudeKaixuanPreset('kaixuan-local')
+    applyClaudeProvider(GLM_PROVIDER)
+    const written = JSON.parse(readFileSync(join(workingHome, '.claude', 'settings.json'), 'utf-8'))
+    expect(written.env.ANTHROPIC_BASE_URL).toBe('https://api.z.ai/api/coding/paas/v4')
+  })
+
+  it('clears the env block when provider=null after applying a custom provider', () => {
+    applyClaudeProvider(GLM_PROVIDER, { apiKey: 'will-be-cleared' })
+    applyClaudeProvider(null)
+    const written = JSON.parse(readFileSync(join(workingHome, '.claude', 'settings.json'), 'utf-8'))
+    expect(written.env.ANTHROPIC_BASE_URL).toBeUndefined()
+    expect(written.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
+    expect(written.env.ANTHROPIC_API_KEY).toBeUndefined()
+  })
+
+  it('readActiveClaudeProvider matches a custom provider in the registry', () => {
+    const settings = { env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/coding/paas/v4' } }
+    expect(readActiveClaudeProvider(settings, REGISTRY)).toBe('glm-5.2')
+  })
+
+  it('readActiveClaudeProvider returns null for an unknown baseUrl', () => {
+    const settings = { env: { ANTHROPIC_BASE_URL: 'https://unknown.example.com' } }
+    expect(readActiveClaudeProvider(settings, REGISTRY)).toBeNull()
+  })
+
+  it('applyProviderToClaudeSettings is pure for custom providers', () => {
+    const input = { env: { KEEP: 'me' } }
+    const next = applyProviderToClaudeSettings(input, GLM_PROVIDER)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: next.env narrows to Record<string,string>; cast only for narrow test access.
+    const env = next.env as Record<string, string>
+    expect(env.KEEP).toBe('me')
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://api.z.ai/api/coding/paas/v4')
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: input.env is read-only.
+    const inputEnv = input.env as Record<string, string>
+    expect(inputEnv.ANTHROPIC_BASE_URL).toBeUndefined()
   })
 })

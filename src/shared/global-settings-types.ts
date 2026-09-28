@@ -22,7 +22,7 @@ import type {
   CodexManagedAccountRuntimeSelection
 } from './managed-account-types'
 import type { NotificationSettings } from './notification-settings-types'
-import type { KaixuanPresetId } from './provider-preset-types'
+import type { ProviderPresetDefinition } from './provider-preset-types'
 import type { CtrlTabOrderMode } from './tab-types'
 import type { TerminalColorOverrides } from './terminal-color-overrides'
 import type { TerminalQuickCommand } from './terminal-quick-command-types'
@@ -408,11 +408,25 @@ export type GlobalSettings = {
    * kaixuan section can show the active chip and the IPC handler can re-apply on
    * demand. See src/shared/provider-preset-types.ts.
    */
-  codexKaixuanPreset: KaixuanPresetId | null
-  /** Same as codexKaixuanPreset but targets ClaudeCode's ~/.claude/settings.json env injection. */
-  claudeKaixuanPreset: KaixuanPresetId | null
-  /** Same as codexKaixuanPreset but targets OpenCode's opencode.json providers map. */
-  opencodeKaixuanPreset: KaixuanPresetId | null
+  /**
+   * Currently active provider id for Codex (built-in 'kaixuan-local' / 'kaixuan-kxpms'
+   * or any id from `customProviders`). null = no provider applied, Codex reads its
+   * system default. Persisted so the AccountsPane kaixuan section can show the active
+   * chip and the IPC handler can re-apply on demand. See src/shared/provider-preset-types.ts.
+   */
+  codexActiveProviderId: string | null
+  /** Same as codexActiveProviderId but targets ClaudeCode's ~/.claude/settings.json env injection. */
+  claudeActiveProviderId: string | null
+  /** Same as codexActiveProviderId but targets OpenCode's opencode.json providers map. */
+  opencodeActiveProviderId: string | null
+  /**
+   * User-editable OpenAI-compatible provider registry. Each entry uses the same
+   * shape as KAIXUAN_PRESETS so the apply functions accept both interchangeably.
+   * The renderer manages this list via a CRUD UI in the AccountsPane section;
+   * IPC handlers treat it as untrusted renderer input and validate before writing
+   * to system config files.
+   */
+  customProviders: ProviderPresetDefinition[]
   /** Custom CODEX_HOME for Codex session-history discovery (defaults to ~/.codex).
    *  History-only: does not change which account/config/hooks Orca uses. */
   codexSessionSourceHome?: {
