@@ -14,9 +14,10 @@ import { KAIXUAN_PRESETS } from './provider-preset-types'
 //   npx vitest run --config config/vitest.config.ts \
 //     src/shared/provider-preset-model-catalog.live.test.ts
 //
-// The local gateway (127.0.0.1:8782) is optional — when it is not running the
-// local assertions are skipped rather than failed, because "dev box is off"
-// is not the same as "the catalog is wrong".
+// Both gateways must be reachable when this suite runs. CI reaches them
+// over the public network; an unreachable gateway must fail the test rather
+// than skip, because "we didn't actually look" is not the same as "the
+// catalog is fine" and silent skips train reviewers to ignore the gate.
 
 const LIVE = process.env.ORCA_LIVE_GATEWAY_TESTS === '1'
 const KEY = process.env.ORCA_KAIXUAN_KEY ?? ''
@@ -69,10 +70,15 @@ describe.skipIf(!LIVE)('kaixuan model catalog vs live gateways', () => {
     expect(missing, `models not served by kxpms: ${missing.join(', ')}`).toEqual([])
   })
 
-  it('every catalog entry exists on the local gateway when it is running', async () => {
+  it('every catalog entry exists on the local gateway', async () => {
     const live = await fetchModelIds('http://127.0.0.1:8782/v1')
     if (!live) {
-      return
+      // Symmetric with the kxpms branch: an unreachable gateway must not
+      // silently pass. CI on a schedule cannot reach a developer's loopback;
+      // the schedule workflow only runs the kxpms case (see
+      // .github/workflows/kaixuan-provider-preset-live.yml). This case stays
+      // in the suite for the local dev-box audit pass.
+      throw new Error('local kaixuan gateway unreachable — cannot validate the catalog')
     }
     const missing = catalog.filter((id) => !live.has(id))
     expect(missing, `models not served by local gateway: ${missing.join(', ')}`).toEqual([])

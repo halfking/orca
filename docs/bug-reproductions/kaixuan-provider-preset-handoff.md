@@ -22,9 +22,10 @@ Audit docs:
 | Live e2e smoke for custom dotted-id across Codex + ClaudeCode + OpenCode | done, `b7f7410db`, mutation-checked against `b2cc5f8c4` + `40f9210d9` |
 | Settings caveat still claimed ClaudeCode 404/501 (disproven 2026-09-28, fixed 2026-09-29) | fixed, all 6 locales |
 | Live-test binary paths overridable (`ORCA_CODEX_BIN` etc.)          | done, audit round 3                                  |
+| Catalog live suite fail-closed on unreachable gateway (both branches) | done, audit round 4                              |
+| Daily CI cron for the kxpms catalog-drift gate (`kaixuan-provider-preset-live.yml`) | done, audit round 4                              |
 
-`origin/main` and `origin/feat/kaixuan-v4-custom-providers` will sit at `b7f7410db` once the
-push lands. No uncommitted work remains on the branch's primary files (`.DS_Store` in
+`origin/main` and `origin/feat/kaixuan-v4-custom-providers` sit at `6b6a3dac9` after the audit-round-3 push. No uncommitted work remains on the branch's primary files (`.DS_Store` in
 `docs/bug-reproductions/` is untracked junk and belongs nowhere; the
 `!docs/bug-reproductions/**` whitelist in `.gitignore` un-ignores it on disk but it is not
 committed).
@@ -162,6 +163,19 @@ handler each turned exactly one case red. A new guard whose test stays green
 after you break the guard is not a guard.
 
 ## Open risks
+
+0. **Catalog drift is now CI-gated.** `.github/workflows/kaixuan-provider-preset-live.yml`
+   schedules `provider-preset-model-catalog.live.test.ts` daily (UTC 04:37) +
+   manual `workflow_dispatch`. The workflow scopes the suite to the kxpms case
+   via `vitest -t 'every catalog entry exists on the kxpms gateway'` because a
+   github-hosted runner cannot reach `127.0.0.1:8782`. Required repository
+   secret: `KAIXUAN_GATEWAY_KEY` (a valid bearer for `llm.kxpms.cn` /
+   `127.0.0.1:8782`); the workflow feeds it in as `ORCA_KAIXUAN_KEY`. The
+   catalog test was made fail-closed in audit round 4 — both branches now
+   throw on unreachable, so "we didn't look" no longer passes for "the
+   catalog is fine". The dotted-id e2e stays opt-in (its bar is writer shape,
+   not drift probing). With key set: 1 case run, expected to pass; without
+   key: 1 case throws on auth, which is the right CI signal.
 
 1. **Custom dotted-id path has been live-CLI verified across Codex + ClaudeCode
    + OpenCode.** `b7f7410db` (test) + `docs/bug-reproductions/kaixuan-provider-preset-dotted-id-live-audit.md`

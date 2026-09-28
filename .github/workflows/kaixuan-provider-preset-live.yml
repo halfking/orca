@@ -1,0 +1,80 @@
+name: Kaixuan provider preset — live catalog
+
+# Why: the `provider-preset-model-catalog.live.test.ts` suite is opt-in
+# (`ORCA_LIVE_GATEWAY_TESTS=1`) because it needs the kxpms gateway reachable
+# and a valid bearer token. CI without those should not fail — that constraint
+# is in `docs/bug-reproductions/kaixuan-provider-preset-handoff.md` (Open
+# risks section), and it rules out wiring this into PR CI. A daily scheduled
+# run keeps catalog drift visible without making any PR red.
+#
+# Why only the catalog and not the dotted-id e2e: the dotted-id test
+# (`src/main/kaixuan-provider-preset-dotted-id-live.test.ts`) spawns the
+# real Codex / ClaudeCode / OpenCode binaries against an isolated HOME. On
+# an ubuntu runner that needs three CLI installs plus a reachable local
+# gateway on 127.0.0.1:8782 — and the test's audit bar is "writer shape",
+# not "CI drift probe". Keep it opt-in for the manual macOS audit pass.
+#
+# Why filter the suite by test name and not run the whole file: after the
+# 2026-09-29 fail-closed change, both gateway cases throw on unreachable.
+# A github-hosted runner cannot reach 127.0.0.1:8782, so the local case
+# would always error and defeat the whole point. The kxpms endpoint is
+# the authoritative catalog-drift probe — it ships the same 10 ids the
+# local gateway serves (verified 2026-09-29), and the local case stays
+# in the suite for the manual dev-box audit pass.
+#
+# Why UTC 04:37: spreads load away from the existing scheduled workflows
+# (clock-skew '17 * * * *', computer-e2e '0 6 * * *', node-next-compat
+# '0 10 * * *', cloud-power-relay-staging '0 9 * * *', e2e '0 17,22 * * *',
+# hourly-mac-build '0 * * * *', daily-mac-build '15 18 * * *', …).
+
+on:
+  schedule:
+    - cron: '37 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaixuan-provider-preset-live
+  cancel-in-progress: false
+
+jobs:
+  catalog-live:
+    name: catalog vs kxpms gateway
+    runs-on: ubuntu-latest
+    # Why 5: the suite is < 30s in normal conditions, but kxpms is a public
+    # endpoint and a cold fetch with a 15s per-attempt timeout can stretch
+    # to 60-90s on a bad day. 5 minutes leaves room for the install + a
+    # pnpm cache miss without ever sitting on a hung runner.
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Node dependencies
+        uses: ./.github/actions/install-node-dependencies
+        with:
+          # Why node, not electron: the catalog suite is plain vitest + fetch;
+          # pulling in the Electron native compile cache here would burn a
+          # cache slot we are not going to use.
+          native-runtime: node
+          cache-dependency-path: pnpm-lock.yaml
+
+      # Why ORCA_LIVE_GATEWAY_TESTS=1: the suite reads this env to flip its
+      # `describe.skipIf(!LIVE)` (src/shared/provider-preset-model-catalog.live.test.ts:21).
+      # Why ORCA_KAIXUAN_KEY from secrets.KAIXUAN_GATEWAY_KEY: the test
+      # hardcodes the env-var name; the secret name carries the "this is the
+      # gateway credential, not a generic ORCA key" semantics.
+      - name: Run kaixuan model catalog live test (kxpms only)
+        env:
+          ORCA_LIVE_GATEWAY_TESTS: '1'
+          ORCA_KAIXUAN_KEY: ${{ secrets.KAIXUAN_GATEWAY_KEY }}
+        run: |
+          # `-t kxpms` selects the test whose name matches the kxpms check; the
+          # local-gateway case is intentionally excluded because the runner cannot
+          # reach 127.0.0.1:8782.
+          pnpm exec vitest run --config config/vitest.config.ts \
+            src/shared/provider-preset-model-catalog.live.test.ts -t 'every catalog entry exists on the kxpms gateway'
