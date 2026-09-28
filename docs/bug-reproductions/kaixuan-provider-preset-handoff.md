@@ -1,8 +1,10 @@
-# kaixuan provider preset — handoff after the type-layer + UI validation + opencode fail-closed audit
+# kaixuan provider preset — handoff after the type-layer + UI validation + opencode fail-closed + live e2e dotted-id smoke
 
 Date: 2026-09-29
-Branch: `feat/kaixuan-v4-custom-providers` merged into `main` as `c49527537`
-Audit doc: [`../bug-reproductions/kaixuan-provider-preset-live-audit.md`](../bug-reproductions/kaixuan-provider-preset-live-audit.md)
+Branch: `feat/kaixuan-v4-custom-providers` merged into `main` as `c49527537`; live e2e smoke commit `b7f7410db` adds to both branches.
+Audit docs:
+  - [`../bug-reproductions/kaixuan-provider-preset-live-audit.md`](../bug-reproductions/kaixuan-provider-preset-live-audit.md) (Defects 1–5 + first live-CLI pass on built-ins)
+  - [`../bug-reproductions/kaixuan-provider-preset-dotted-id-live-audit.md`](../bug-reproductions/kaixuan-provider-preset-dotted-id-live-audit.md) (custom dotted-id live e2e — Risk 1 closed)
 
 ## Where this stands
 
@@ -17,11 +19,13 @@ Audit doc: [`../bug-reproductions/kaixuan-provider-preset-live-audit.md`](../bug
 | OpenCode fail-closed (refuse to overwrite unparseable config)  | done, `50564adda`                                       |
 | Orchestration revert caused by v4 merge                       | fixed, `3b1ca1312`                                      |
 | AGENTS.md pointer to the audit + two smoke-test rules          | done, `c49527537`                                       |
+| Live e2e smoke for custom dotted-id across Codex + ClaudeCode + OpenCode | done, `b7f7410db`, mutation-checked against `b2cc5f8c4` + `40f9210d9` |
 
-`origin/main` and `origin/feat/kaixuan-v4-custom-providers` both sit at `c49527537`. No
-uncommitted work remains on the branch's primary files (`.DS_Store` in `docs/bug-reproductions/`
-is untracked junk and belongs nowhere; the `!docs/bug-reproductions/**` whitelist in
-`.gitignore` un-ignores it on disk but it is not committed).
+`origin/main` and `origin/feat/kaixuan-v4-custom-providers` will sit at `b7f7410db` once the
+push lands. No uncommitted work remains on the branch's primary files (`.DS_Store` in
+`docs/bug-reproductions/` is untracked junk and belongs nowhere; the
+`!docs/bug-reproductions/**` whitelist in `.gitignore` un-ignores it on disk but it is not
+committed).
 
 ## What the audit actually found (v4 → audit round 1)
 
@@ -101,14 +105,14 @@ after you break the guard is not a guard.
 
 ## Open risks
 
-1. **The custom-provider path has only been live-CLI verified for the OpenCode
-   half of dotted ids.** `40f9210d9` quotes the Codex header and the new test
-   parses it with `parseTomlTableHeaderPath`, but `codex` is not installed on
-   this host (`which codex` empty, no global package). The audit doc records a
-   throwaway `npm i @openai/codex@0.158.0` install was used; that install is
-   gone. Any future writer change to `renderProviderTable` or the strip regex
-   must be re-verified live. Isolate `HOME` — a plain `tsx` import writes the
-   user's real `~/.codex/config.toml`.
+1. **Custom dotted-id path has been live-CLI verified across Codex + ClaudeCode
+   + OpenCode.** `b7f7410db` (test) + `docs/bug-reproductions/kaixuan-provider-preset-dotted-id-live-audit.md`
+   (doc) drive a registry entry (`glm-5.2`, custom base URLs, custom model
+   subset) through the real binaries from isolated HOME. The test is opt-in
+   (`ORCA_LIVE_KAIXUAN_AUDIT=1`) and mutation-checked: reverting either `b2cc5f8c4`
+   (env_key clash) or `40f9210d9` (dotted id header) turns the Codex case
+   red. The live smoke stays opt-in because it needs a real bearer token and
+   the local kxpms gateway; CI without those should not fail.
 
 2. **Apply-shape tests prove the writer, not the consumer.** A config that
    parses cleanly can still 401 against a real gateway (see `b2cc5f8c4`'s
@@ -136,7 +140,14 @@ after you break the guard is not a guard.
 
 ## If you pick this up
 
-Do not re-run the audits already recorded in the audit doc. The useful next
-step is risk 1: write the isolated-HOME script the audit doc describes, apply a
-registry entry with a dotted id to all three agents, and run the real binaries.
-Expect it to find something — that is why it is the next step.
+Do not re-run the audits already recorded in the audit doc. The live e2e smoke
+at `src/main/kaixuan-provider-preset-dotted-id-live.test.ts` covers what was risk
+1. Open risks left:
+
+- The kxpms gateway lists `glm-5.2` in `/v1/models` and serves it on
+  `/v1/messages` + `/v1/chat/completions` but returns 503 on `/v1/responses`.
+  The Codex smoke uses `gpt-5.5` instead because the writer is not at fault.
+  The catalog live test should be widened to probe per-API-path routing.
+- The catalog live test (`provider-preset-model-catalog.live.test.ts`) is
+  still skipped by default; keep its skip semantics consistent with the new
+  dotted-id live test.

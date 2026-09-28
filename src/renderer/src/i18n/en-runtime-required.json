@@ -1083,7 +1083,7 @@
           "f5d8d2a6a1": "Open platform.minimax.io/console/usage in your browser and sign in.",
           "kaixuanAgentClaudeCaveat": "Writes ANTHROPIC_BASE_URL into ~/.claude/settings.json. Provide the inline API key above to also embed ANTHROPIC_AUTH_TOKEN — otherwise ClaudeCode must inherit it from the shell that runs it.",
           "kaixuanAgentOpencodeCaveat": "Writes provider.kaixuan-<id> with options.baseURL + options.apiKey. OpenCode uses {env:OPENAI_API_KEY} when the inline key is blank — make sure the shell running opencode has it exported.",
-          "kaixuanCaveat": "Read before enabling. The kxpms gateway ships an OpenAI Responses endpoint; ClaudeCode walks the Anthropic /v1/messages protocol. Apply will write the right base URL into ~/.claude/settings.json, but ClaudeCode worker calls may 404/501 against the upstream until the gateway team exposes an Anthropic-compatible route. Codex and OpenCode both speak OpenAI Responses and work as soon as OPENAI_API_KEY is set in the shell that runs the agent.",
+          "kaixuanCaveat": "Read before enabling. Both Kaixuan gateways (local 127.0.0.1:8782 and remote https://llm.kxpms.cn) serve the Anthropic /v1/messages route and the OpenAI /v1/responses route, verified live against both on 2026-09-29. Apply writes the matching base URL into ~/.claude/settings.json, ~/.codex/config.toml and ~/.config/opencode/opencode.json. If you leave the inline API key blank, Orca writes an environment variable reference instead, so the shell that launches the agent must have OPENAI_API_KEY exported.",
           "kaixuanCustomDialogTitle": "Custom provider",
           "kaixuanCustomSave": "Save"
         },

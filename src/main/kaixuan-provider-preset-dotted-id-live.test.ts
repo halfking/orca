@@ -35,13 +35,21 @@ import { spawnSync } from 'node:child_process'
 import { applyCodexProvider } from './codex/codex-apply-provider-preset'
 import { applyClaudeProvider } from './claude/claude-apply-provider-preset'
 import { applyOpenCodeProvider } from './opencode/opencode-apply-provider-preset'
-import { BUILT_IN_PROVIDER_IDS, type ProviderPresetDefinition } from '../shared/provider-preset-types'
+import {
+  BUILT_IN_PROVIDER_IDS,
+  type ProviderPresetDefinition
+} from '../shared/provider-preset-types'
 
-// Local install of the same codex-cli version the previous audit verified against.
-// Lives outside the repo so it doesn't pollute the worktree or get committed.
-const CODEX_BIN = '/tmp/orca-kaixuan-audit/2026-09-29/node_modules/@openai/codex/bin/codex.js'
-const CLAUDE_BIN = '/Users/xutaohuang/.local/bin/claude'
-const OPENCODE_BIN = '/Users/xutaohuang/.opencode/bin/opencode'
+// Why env-overridable: the previous audit hardcoded a date-stamped /tmp path.
+// macOS reaps /tmp, so that constant silently rots into a permanent failure that
+// looks like a code defect. Each falls back to a `which`-style default, and a
+// missing binary still throws (cli-missing) — this only changes WHERE it looks,
+// never whether a missing CLI can pass the suite.
+const CODEX_BIN =
+  process.env.ORCA_CODEX_BIN ??
+  '/tmp/orca-kaixuan-audit/2026-09-29/node_modules/@openai/codex/bin/codex.js'
+const CLAUDE_BIN = process.env.ORCA_CLAUDE_BIN ?? '/Users/xutaohuang/.local/bin/claude'
+const OPENCODE_BIN = process.env.ORCA_OPENCODE_BIN ?? '/Users/xutaohuang/.opencode/bin/opencode'
 
 // What: v4 UI placeholder id, dotted, plus a custom base URL pointing at the local
 // kaixuan gateway (no auth) and a curated model subset (NOT the full kxpms catalog —
@@ -269,7 +277,10 @@ describe.skipIf(!LIVE)('kaixuan provider preset — custom dotted-id live e2e', 
     if (smoke.outcome === 'config-loaded-and-call-attempted') {
       if (mode === 'call') {
         const successMarker = 'ORCA_KAIXUAN_DOTTED_OK'
-        if (!smoke.stdoutTail.includes(successMarker) && !smoke.stderrTail.includes(successMarker)) {
+        if (
+          !smoke.stdoutTail.includes(successMarker) &&
+          !smoke.stderrTail.includes(successMarker)
+        ) {
           throw new Error(
             [
               `${agent} did not return the expected reply token "${successMarker}".`,
@@ -297,7 +308,6 @@ describe.skipIf(!LIVE)('kaixuan provider preset — custom dotted-id live e2e', 
     }
     // Soft-pass: write the call outcome so a human can read it from the test
     // log even when the network blip is non-fatal.
-    // eslint-disable-next-line no-console
     console.log(
       `[kaixuan-live] ${agent}: outcome=${smoke.outcome} exit=${smoke.exitCode ?? 'null'}`
     )
@@ -417,4 +427,3 @@ function spawnAndCapture({
     stderrTail
   }
 }
-
