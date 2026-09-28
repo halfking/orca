@@ -35,7 +35,11 @@ const flag = (name) => {
 }
 
 if (command === 'run-create') {
-  process.stdout.write(JSON.stringify({ result: { id: 'run_stub', runId: 'run_stub', coordinator_handle: 'term_stub', objective: flag('--objective') } }))
+  // The real binary answers { result: { run: { id, coordinator_handle } } }. An earlier version of
+  // this stub answered { result: { id } }, which no binary emits, and a live run then wrote an
+  // empty run id into every ledger row. A stub that invents a shape teaches the check the wrong
+  // contract, so it mirrors the receipt the runtime actually returns.
+  process.stdout.write(JSON.stringify({ result: { run: { id: 'run_stub', coordinator_handle: 'term_stub' }, mutation: { requestId: 'req_stub' } } }))
 } else if (command === 'task-create') {
   const title = flag('--task-title')
   const deps = flag('--deps')
@@ -197,6 +201,14 @@ for (const value of depArgs) {
   )
 }
 check('ledger received an entry per dispatched task', ledgerExists)
+check(
+  'every ledger row carries a non-empty run id',
+  ledgerExists &&
+    readFileSync(ledgerPath, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .every((line) => JSON.parse(line).run === 'run_stub')
+)
 if (ledgerExists) {
   const view = buildView(parseLedger(readFileSync(ledgerPath, 'utf8')))
   const tasks = new Set(view.folded.tasks.map((task) => task.id))

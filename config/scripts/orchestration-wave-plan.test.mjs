@@ -387,6 +387,13 @@ describe('coordinator binding', () => {
     expect(script).not.toContain("'$RUN_COORDINATOR'")
   })
 
+  it('reads the run id out of the receipt shape the binary actually returns', () => {
+    const script = renderShell(compilePlan(plan()).steps)
+    // run-create answers { result: { run: { id } } }; reading only result.task/result.id yields an
+    // empty run, and every ledger row then fails on a non-empty run.
+    expect(script).toContain('r?.task??r?.run??r')
+  })
+
   it('refuses to run a plan whose run-create receipt carries no coordinator', () => {
     const script = renderShell(compilePlan(plan()).steps)
     expect(script).toContain('if [ -z "$RUN_COORDINATOR" ]')

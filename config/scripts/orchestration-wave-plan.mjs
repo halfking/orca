@@ -456,7 +456,13 @@ const PREAMBLE = (ledgerPath) =>
     '# Receipt shapes come from the binary that will actually run these commands. If an id prints',
     '# empty, capture one receipt and widen this lookup before trusting the script.',
     '__orca_task_id() {',
-    "  node -e 'const j=JSON.parse(process.argv[1]);const t=j?.result?.task??j?.result??j;" +
+    // Why the run branch is here: run-create answers { result: { run: { id } } } and task-create
+    // answers { result: { task: { id } } }. A live run proved the run shape was missing — the
+    // script opened a Run, wrote four dispatches, and every ledger record failed on an empty run
+    // because the id was read from the wrong place. The stub had been answering { result: { id } },
+    // a shape no real binary emits, so nothing caught it until a real Run existed.
+    "  node -e 'const j=JSON.parse(process.argv[1]);const r=j?.result??j;" +
+      'const t=r?.task??r?.run??r;' +
       'process.stdout.write(String(t?.id??t?.taskId??""))\' "$1"',
     '}',
     '',
