@@ -70,7 +70,27 @@ L4 合并层  合并协议 + 合并脚本（rebase → 回归 → 合入 → 冲
 3. **没有历史事件流**。DB 里有当前状态快照与 `mutation_receipts`，但没有 append-only 的调度事件表。
 4. **没有写集冲突分析**。`worker_done --files-modified` 提供了原料，但没人计算任务两两之间的文件重叠，也就没人据此决定合并顺序。
 
-### 2.3 一个容易被忽略的上游约束
+### 2.3 同生态已有组件：`Orca-Orchestration`（`orca-dag`）
+
+本机 `~/workspace/ai/orca-orchestration` 存在一个独立项目 **Orca-Orchestration**，它**不是** Orca 上游的一部分，而是包在 `orca` CLI 外面的第三块：
+
+| 它已做 | 实现方式 |
+| --- | --- |
+| DAG 实时可视化 | 轮询 `task-list --json`，dagre 布局 + React Flow 渲染 |
+| 每节点选 harness / model | `server/src/config.ts` 存 `.orca-dag.config.json`（Orca 的 task 没有 harness 字段） |
+| 自驱动 coordinator | 找出所有 `ready` 任务，按并发上限并行 `worker-start`，`worker_done` 后自动回收 |
+
+它证明了一件重要的事：**Orca 是故意不做调度器的**（官方 skill 原话：*"Agents still choose placement and concurrency; Orca does not schedule workers."*）。所以 DAG 循环放在上层是符合上游设计的，不是绕路。
+
+但它**没有**覆盖本文的三个缺口——源码里搜 `audit|verdict|merge|files-modified` 只命中 `saveConfig` 的对象合并和一处 `legacy` 审计墓碑注释：
+
+- 无审计 verdict 契约，节点干完就是干完了；
+- 无合并阶段，合并不是 DAG 里的一个节点类型；
+- 无写集记录，因此也没有重叠矩阵和合并顺序。
+
+**结论：不重复造 DAG 可视化与并行派发。** 本方案的价值集中在它没有的三件事——角色模型矩阵、审计/合并协议、调度路径账本，并且以 CLI 侧 companion 的形态与它共存（它画图，本工具给出可复制的 argv 与合并顺序）。
+
+### 2.4 一个容易被忽略的上游约束
 
 `--model` / `--effort` **只对 claude / codex / cursor / antigravity / muse 生效**，opencode 与 zcode 拒绝 `--model`，跑自己 config 里的模型；`--effort` 必须配 `--model`，且两者都不能与 `--terminal` 组合。这意味着**模型矩阵不能写成"角色 → 任意模型"的自由映射**，必须按 agent 分支声明。上游另有纪律：只在用户点名模型时才传 `--model`，否则继承用户默认——矩阵要显式声明才传。
 
@@ -251,6 +271,37 @@ node config/scripts/orchestration-schedule-ledger.mjs view --ledger <path> --jso
 - **合并队列只收可落地任务**：`coordinator` / `auditor` / `merger` 不进入合并顺序；**写集未记录的可落地任务排最后**——未知不等于小。
 - 覆盖测试见 `config/scripts/orchestration-schedule-ledger.test.mjs`（17 例，覆盖解析失败、折叠、DAG 波次、门禁、写集矩阵、合并顺序、渲染）。
 
+#### 4.7.2 已实现：`config/scripts/orchestration-role-matrix.mjs` + `orchestration-wave-plan.mjs`
+
+把 4.2 的矩阵和 4.4 的 DAG 从文档变成可执行件：
+
+```text
+node config/scripts/orchestration-wave-plan.mjs init --plan plan.json --objective "<目标>"
+node config/scripts/orchestration-wave-plan.mjs emit --plan plan.json --json          # 结构化步骤 + 告警
+node config/scripts/orchestration-wave-plan.mjs emit --plan plan.json --allow-warnings  # 可执行 shell
+```
+
+**派发前拒绝，而不是派发时失败**（error 阻断 emit，warning 需显式 `--allow-warnings`）：
+
+| 拒绝/告警 | 挡住的是哪类并行事故 |
+| --- | --- |
+| 依赖指向不存在的任务、依赖成环 | 任务永远等不到 ready，或派发器空转 |
+| 审计角色带写集 | 审计者自己改了代码，verdict 失去独立性 |
+| 同波次两个任务抢同一端口/容器/库 | worktree 隔离不了仓库外的资源碰撞 |
+| 合并节点不依赖某个审计 | 未审计的改动直接落地 |
+| 两个落地任务写集重叠 | 合并期冲突集中爆发（降级为告警，因为顺序可解） |
+| 给 opencode/zcode 传 `--model`、传了 effort 却没 model | 运行时会拒的 flag，编译期先拒 |
+| 模型未确认 | 告警"agent 默认值生效"，成本不可预期的显式提醒 |
+
+设计约束：
+
+- **波次由 DAG 推导**，不读计划里手写的 wave。
+- **图不可排序时（成环或依赖未知），资源冲突检查不再豁免任何一对任务**——排不出顺序就不能断言"它们不会同时跑"。
+- **矩阵不内置任何模型 id**：上游规定只在用户点名时才传 `--model`，所以 tier 只表达"需要哪一档"，具体 id 由计划 `confirmModels: true` 后显式提供。
+- **角色默认 effort 在没有 model 时被静默丢弃**（binary 会拒 `--effort` 无 `--model`），但计划里**手写**的 effort 无 model 是硬错误。
+- 生成的 shell 用 heredoc 承载多行 spec、用 shell 变量承载真实 Task id（`--deps "[\"${TASK_A}\"]"`），每个 Dispatch/Gate 都自动写一条账本。
+- 覆盖测试见 `orchestration-role-matrix.test.mjs`（12 例）与 `orchestration-wave-plan.test.mjs`（21 例）。
+
 ---
 
 ## 5. 执行阶段
@@ -259,7 +310,7 @@ node config/scripts/orchestration-schedule-ledger.mjs view --ledger <path> --jso
 | --- | --- | --- | --- |
 | P0 | 本文档 + `.gitignore` 放行 + AGENTS.md 挂链 | 文档可被 git 跟踪，AGENTS.md 可跳转 | ✅ 完成 |
 | P1 | **L3 可见性**：调度账本记录器 + 单命令调度视图 | 合成 Run 数据产出完整视图：树、DAG 阻塞、argv、写集重叠矩阵 | ✅ 完成（17/17 测试 + CLI 端到端 + lint/format） |
-| P2 | **L0/L1 规程落地**：角色矩阵 + Task spec 模板 + 五波命令骨架脚本 | 能对一个新目标一键生成五波编排命令（含写集与资源分配） | 待定 |
+| P2 | **L0/L1 规程落地**：角色矩阵 + Task spec 模板 + 五波命令骨架编译 | 一个计划编译出完整 `orca` 命令序列，且非法计划在派发前就被拒 | ✅ 完成（33 例测试 + 脚本生成 + `bash -n` 校验） |
 | P3 | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | 对真实分支执行一次完整合并，冲突被显式报告而非静默处理 | 待定 |
 | P4 | **真实 pilot**：在本仓库用两个真实任务跑完整链路 | 两个任务零互相干扰、各自出 verdict、按建议顺序合并、账本可复盘 | 待定（需授权） |
 

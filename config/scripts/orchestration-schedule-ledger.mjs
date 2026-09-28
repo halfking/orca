@@ -421,6 +421,13 @@ function parseArgs(argv) {
 
 function runRecord(args) {
   const sources = []
+  if (args.stdin) {
+    for (const line of readFileSync(0, 'utf8').split('\n')) {
+      if (line.trim() !== '') {
+        sources.push(JSON.parse(line))
+      }
+    }
+  }
   if (args.entry) {
     sources.push(JSON.parse(args.entry))
   }
@@ -432,7 +439,7 @@ function runRecord(args) {
     }
   }
   if (sources.length === 0) {
-    throw new Error('record needs --entry <json> or --receipts <jsonl>')
+    throw new Error('record needs --stdin, --entry <json> or --receipts <jsonl>')
   }
   const run = requireString(args.run ?? sources[0].run, 'run')
   const ledgerPath = resolve(args.ledger ?? defaultLedgerPath(run))
