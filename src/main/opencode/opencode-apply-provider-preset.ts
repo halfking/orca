@@ -110,9 +110,17 @@ export function readActiveOpenCodeProvider(
 }
 
 /** Apply or remove the provider preset on disk.
- *  Why: when caller supplies an explicit apiKey, we override the placeholder; this is
- *  the Orca-side equivalent of running `opencode auth set <id> <token>` from the
- *  shell before invoking the agent.
+ *  Why: when caller supplies an explicit apiKey, we override the placeholder
+ *  with the literal token. Note this is **not** equivalent to running
+ *  `opencode auth set <id> <token>`: that command writes to
+ *  `$XDG_DATA_HOME/opencode/auth.json` (per opencode `packages/opencode/src/auth/index.ts`),
+ *  while this function writes to `options.apiKey` inside
+ *  `$XDG_CONFIG_HOME/opencode/opencode.json`. opencode 1.x's config schema
+ *  accepts a literal token in `options.apiKey`, so both forms work at runtime,
+ *  but they live in different files with different security profiles. The
+ *  literal-token path keeps the key inside the user's general config file
+ *  alongside theme / model / mcp / permission / agents / instructions — the
+ *  same fail-closed guard above therefore applies to it as well.
  */
 export function applyOpenCodeProvider(
   provider: ProviderPresetDefinition | null,

@@ -1,0 +1,8 @@
+# Local-only ignore for the bug-reproductions whitelist.
+# The root .gitignore whitelists the whole subtree via `!docs/bug-reproductions/**`
+# so .DS_Store slips through; this file re-ignores OS junk so editors can dump
+# their bookkeeping files without committing them. Intended tracking surface is
+# source-controlled only.
+.DS_Store
+Thumbs.db
+*.swp

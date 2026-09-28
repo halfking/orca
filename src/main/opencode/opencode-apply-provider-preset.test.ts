@@ -301,4 +301,33 @@ describe('opencode-apply-provider-preset', () => {
     // ...and the file on disk must be byte-identical to what the user had.
     expect(readFileSync(configPath, 'utf-8')).toBe(broken)
   })
+
+  // --- regression: v4 custom-provider + literal apiKey writes the token verbatim ---
+  // The provider entry's options.apiKey is opencode's literal-token slot (per
+  // opencode.ai/docs/providers and verified live against opencode 1.18.33 on
+  // 2026-09-29). The earlier v3 test `writes the literal apiKey when caller
+  // supplies one` only covers kaixuan built-ins; the v4 path through
+  // `applyOpenCodeProvider` is the one reachable from the registry UI.
+  it('writes the literal apiKey verbatim when v4 applyOpenCodeProvider receives one', () => {
+    const result = applyOpenCodeProvider(GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM, {
+      apiKey: 'sk-literal-token-v4'
+    })
+    expect(result.error).toBeNull()
+    const configPath = join(workingHome, '.config', 'opencode', 'opencode.json')
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(written.provider['glm-5.2'].options.apiKey).toBe('sk-literal-token-v4')
+    expect(written.provider['glm-5.2'].npm).toBe('@ai-sdk/openai-compatible')
+  })
+
+  // --- regression: when no apiKey is supplied, options.apiKey must stay a placeholder ---
+  // The earlier v4 test uses the default `{env:OPENAI_API_KEY}` placeholder but
+  // never pins the behaviour against a future refactor that might default the
+  // literal path. Lock it.
+  it('keeps the {env:OPENAI_API_KEY} placeholder when v4 applyOpenCodeProvider gets no apiKey', () => {
+    const result = applyOpenCodeProvider(GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
+    expect(result.error).toBeNull()
+    const configPath = join(workingHome, '.config', 'opencode', 'opencode.json')
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(written.provider['glm-5.2'].options.apiKey).toBe('{env:OPENAI_API_KEY}')
+  })
 })
