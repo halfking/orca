@@ -118,6 +118,31 @@ export const KAIXUAN_PRESETS: Readonly<Record<KaixuanPresetId, ProviderPresetDef
 
 export const KAIXUAN_PRESET_ORDER: readonly KaixuanPresetId[] = ['kaixuan-local', 'kaixuan-kxpms']
 
+/** A preset id is interpolated into a TOML table header, a TOML double-quoted
+ *  string value, a JSON object key and a regex alternation (the apply functions
+ *  run every id through escapeRegex). Only characters that would terminate or
+ *  split one of those constructs are rejected. */
+const INTERPOLATABLE_PROVIDER_ID_PATTERN = /^[A-Za-z0-9_.|@:+-]+$/u
+const SAFE_ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
+
+/** True when `id` can be embedded in a TOML header / quoted value, a JSON key
+ *  and a regex alternation without corrupting any of them.
+ *
+ *  What it does NOT cover: `[model_providers.<id>]` is written unquoted, so an
+ *  id containing `.` is read by TOML as a nested table and Codex then cannot
+ *  resolve `model_providers["glm-5.2"]`. OpenCode and the registry itself are
+ *  fine with dots. Fixing that means quoting the table header in
+ *  codex-apply-provider-preset.ts — tracked as a known gap, not guarded here. */
+export function isProviderPresetIdInterpolationSafe(id: string): boolean {
+  return INTERPOLATABLE_PROVIDER_ID_PATTERN.test(id)
+}
+
+/** True when `name` is a portable environment variable name — it is written
+ *  straight into `env_key = "<name>"` and into the ClaudeCode env block. */
+export function isSafeEnvKeyName(name: string): boolean {
+  return SAFE_ENV_KEY_PATTERN.test(name)
+}
+
 /** IPC handler 入参：apply 一个 preset 到指定 agent 时使用。`provider` 是完整
  *  定义（renderer 从 built-in + 自定义 registry 解析后传入），handler 不需要
  *  知道 provider 是 built-in 还是自定义。 */
