@@ -65,6 +65,14 @@ Cover all four concisely. Don't pad or walk the diff.
 
 Always use the primary working directory (the worktree) for all file reads and edits. Never follow absolute paths from subagent results that point to the main repo.
 
+## Parallel Task Orchestration
+
+When several tasks advance at once, each needs its own worktree, a declared write set, its own
+audit and test Dispatch, and a merge gated on that audit. The role-to-model matrix, the five-wave
+DAG, the verdict contract, and the scheduling-ledger visibility rules are in
+[`docs/reference/parallel-task-orchestration.md`](./docs/reference/parallel-task-orchestration.md).
+Coordinate them with `orca orchestration`, not with a non-Orca subagent tool.
+
 ## Cross-Platform Support
 
 Orca targets macOS, Linux, and Windows. Keep all platform-dependent behavior behind runtime checks:
