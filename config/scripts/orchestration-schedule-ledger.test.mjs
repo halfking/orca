@@ -1,3 +1,7 @@
+import { execFile } from 'node:child_process'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -9,6 +13,8 @@ import {
   renderView,
   suggestMergeOrder
 } from './orchestration-schedule-ledger.mjs'
+
+const LEDGER_SCRIPT = join(import.meta.dirname, 'orchestration-schedule-ledger.mjs')
 
 const RUN = 'run_test'
 
@@ -106,6 +112,53 @@ describe('ledger parsing', () => {
   it('requires a run id', () => {
     expect(() => normalizeEntry({ event: 'note' })).toThrow(/"run"/)
   })
+})
+
+describe('concurrent writers', () => {
+  // The ledger is the one file every worker shares, and a torn line from two writers appending at
+  // once would corrupt the whole audit trail. These run as separate processes because the property
+  // under test is cross-process append atomicity, which a same-process test cannot observe.
+  function record(ledger, payload) {
+    return new Promise((resolve) => {
+      const child = execFile('node', [LEDGER_SCRIPT, 'record', '--stdin', '--ledger', ledger])
+      child.on('close', resolve)
+      child.stdin.end(payload)
+    })
+  }
+
+  it('keeps every entry intact when ten processes append a wide record at once', async () => {
+    const ledger = join(mkdtempSync(join(tmpdir(), 'orca-ledger-')), 'run.jsonl')
+    const writers = 10
+    // Sized against a control run rather than guessed: a read-modify-write append loses writes at
+    // 8 writers x 20KB and starts producing torn lines at 16 x 50KB. A narrower test passes just
+    // as happily against a broken append, which is the same as no test at all.
+    const payloads = Array.from(
+      { length: writers },
+      (_, index) =>
+        `${JSON.stringify({
+          run: 'concurrent',
+          event: 'worker-done',
+          task: `impl_${index}`,
+          state: 'completed',
+          findings: Array.from({ length: 120 }, (_, n) => ({
+            file: `src/deep/nested/path/file_${n}.ts`,
+            line: n + 1,
+            severity: 'major',
+            evidence: `reproduction steps for finding ${n} belonging to task ${index}`
+          }))
+        })}\n`
+    )
+
+    await Promise.all(payloads.map((payload) => record(ledger, payload)))
+
+    const text = readFileSync(ledger, 'utf8')
+    const entries = parseLedger(text)
+    expect(entries).toHaveLength(writers)
+    expect(new Set(entries.map((entry) => entry.task)).size).toBe(writers)
+    for (const entry of entries) {
+      expect(entry.findings).toHaveLength(120)
+    }
+  }, 60_000)
 })
 
 describe('folding the append-only trail', () => {
@@ -241,5 +294,26 @@ describe('rendering the scheduling path', () => {
 
   it('gives a runnable argv for whatever is actionable right now', () => {
     expect(rendered).toContain('orca orchestration worker-start --task audit_b')
+  })
+
+  it('never truncates a verdict, because a cut pass_with_findings reads as pass', () => {
+    const withFindings = buildView([
+      entry({
+        task: 'impl_c',
+        event: 'worker-done',
+        state: 'completed',
+        role: 'implementer',
+        verdict: 'pass_with_findings',
+        filesModified: ['src/c.ts']
+      })
+    ])
+    const text = renderView(
+      withFindings.folded,
+      withFindings.blocking,
+      withFindings.matrix,
+      withFindings.order
+    )
+    expect(text).toContain('pass_with_findings')
+    expect(text).not.toContain('pass_with_ ')
   })
 })
