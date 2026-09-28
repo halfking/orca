@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  buildDoneEntry,
   buildMergePlan,
   computeMergeReadiness,
   executeMerge,
@@ -198,6 +199,104 @@ describe('audit verdict contract', () => {
       ]).folded
     )
     expect(failed.blockers).toContain('impl_a: gate gate_1 was resolved "fail"')
+  })
+})
+
+describe('recording a worker completion', () => {
+  it('accepts a well-formed pass and records the evidence the gate reads', () => {
+    const entry = buildDoneEntry({
+      run: 'run_x',
+      task: 'audit_a',
+      role: 'auditor',
+      verdict: 'pass',
+      report: 'reports/audit-a.md',
+      finding: [],
+      file: [],
+      dep: ['impl_a']
+    })
+    expect(entry).toMatchObject({
+      event: 'worker-done',
+      task: 'audit_a',
+      verdict: 'pass',
+      reportPath: 'reports/audit-a.md',
+      deps: ['impl_a']
+    })
+    expect(normalizeEntry(entry).verdict).toBe('pass')
+  })
+
+  it('refuses to record a pass that carries findings', () => {
+    expect(() =>
+      buildDoneEntry({
+        run: 'r',
+        task: 'audit_a',
+        role: 'auditor',
+        verdict: 'pass',
+        report: 'reports/a.md',
+        finding: ['{"file":"src/a.ts","line":3,"severity":"major","evidence":"npm test fails"}'],
+        file: [],
+        dep: []
+      })
+    ).toThrow(/verdict is pass but findings are present/)
+  })
+
+  it('refuses to record a verdict with no report, before it can reach the gate', () => {
+    expect(() =>
+      buildDoneEntry({
+        run: 'r',
+        task: 'audit_a',
+        role: 'auditor',
+        verdict: 'pass',
+        report: null,
+        finding: [],
+        file: [],
+        dep: []
+      })
+    ).toThrow(/no report path recorded/)
+  })
+
+  it('refuses an unknown verdict instead of storing it as fact', () => {
+    expect(() =>
+      buildDoneEntry({
+        run: 'r',
+        task: 'audit_a',
+        role: 'auditor',
+        verdict: 'looks-good',
+        report: 'r.md',
+        finding: [],
+        file: [],
+        dep: []
+      })
+    ).toThrow(/unknown verdict/)
+  })
+
+  it('lets a non-audit task finish without a verdict', () => {
+    const entry = buildDoneEntry({
+      run: 'r',
+      task: 'impl_a',
+      role: 'implementer',
+      outcome: 'succeeded',
+      report: null,
+      finding: [],
+      file: ['src/a.ts', 'src/b.ts'],
+      dep: []
+    })
+    expect(entry.verdict).toBeNull()
+    expect(entry.filesModified).toEqual(['src/a.ts', 'src/b.ts'])
+  })
+
+  it('refuses an auditor that finished without saying what it found', () => {
+    expect(() =>
+      buildDoneEntry({
+        run: 'r',
+        task: 'audit_a',
+        role: 'auditor',
+        verdict: null,
+        report: 'r.md',
+        finding: [],
+        file: [],
+        dep: []
+      })
+    ).toThrow(/no verdict recorded/)
   })
 })
 

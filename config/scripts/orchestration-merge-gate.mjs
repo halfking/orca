@@ -18,7 +18,13 @@
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
-import { buildView, readLedger } from './orchestration-schedule-ledger.mjs'
+import {
+  buildView,
+  appendEntry,
+  defaultLedgerPath,
+  normalizeEntry,
+  readLedger
+} from './orchestration-schedule-ledger.mjs'
 
 const PASSING_VERDICTS = new Set(['pass', 'pass_with_findings'])
 const ALL_VERDICTS = new Set(['pass', 'pass_with_findings', 'fail'])
@@ -43,54 +49,37 @@ export function gitSucceeds(args, cwd) {
 }
 
 /**
- * Validate every audit verdict against the contract in the plan. The point of an audit is that
- * someone can check it later, so a verdict with no retrievable report is not a pass — it is an
- * unrecorded claim, and it blocks the merge exactly like a missing audit does.
+ * The verdict contract, in one place, so the gate that reads a verdict and the writer that records
+ * one cannot drift apart. A verdict is only as good as the evidence behind it, and contradictions
+ * between the two are the failure this exists to catch.
  */
-export function validateVerdicts(folded) {
-  const rows = []
-  for (const task of folded.tasks) {
-    const audited = task.role === 'auditor' || task.verdict != null
-    if (!audited) {
-      continue
-    }
-    const problems = []
-    const verdict = task.verdict
-    if (!verdict) {
-      problems.push('no verdict recorded')
-    } else if (!ALL_VERDICTS.has(verdict)) {
-      problems.push(`unknown verdict "${verdict}"; expected pass | pass_with_findings | fail`)
-    }
-    const findings = normalizeFindings(task.findings)
-    if (verdict === 'pass' && findings.length > 0) {
-      problems.push('verdict is pass but findings are present')
-    }
-    if (verdict === 'pass_with_findings' && findings.length === 0) {
-      problems.push('verdict is pass_with_findings but no finding is recorded')
-    }
-    if (verdict === 'fail' && !findings.some((finding) => finding.severity === 'blocker')) {
-      problems.push('verdict is fail but no finding is marked as a blocker')
-    }
-    for (const finding of findings) {
-      if (!finding.file || finding.line == null) {
-        problems.push(`a finding is missing its location: ${JSON.stringify(finding)}`)
-      } else if (!finding.evidence) {
-        problems.push(`${finding.file}:${finding.line} has no reproducible evidence`)
-      }
-    }
-    if (verdict && task.reportPaths.length === 0) {
-      problems.push('no report path recorded, so the audit cannot be re-read')
-    }
-    rows.push({
-      id: task.id,
-      role: task.role,
-      verdict,
-      findings: findings.length,
-      reports: task.reportPaths,
-      problems
-    })
+export function verdictContractProblems(verdict, findings, reportCount) {
+  const problems = []
+  if (!verdict) {
+    problems.push('no verdict recorded')
+  } else if (!ALL_VERDICTS.has(verdict)) {
+    problems.push(`unknown verdict "${verdict}"; expected pass | pass_with_findings | fail`)
   }
-  return rows
+  if (verdict === 'pass' && findings.length > 0) {
+    problems.push('verdict is pass but findings are present')
+  }
+  if (verdict === 'pass_with_findings' && findings.length === 0) {
+    problems.push('verdict is pass_with_findings but no finding is recorded')
+  }
+  if (verdict === 'fail' && !findings.some((finding) => finding.severity === 'blocker')) {
+    problems.push('verdict is fail but no finding is marked as a blocker')
+  }
+  for (const finding of findings) {
+    if (!finding.file || finding.line == null) {
+      problems.push(`a finding is missing its location: ${JSON.stringify(finding)}`)
+    } else if (!finding.evidence) {
+      problems.push(`${finding.file}:${finding.line} has no reproducible evidence`)
+    }
+  }
+  if (verdict && reportCount === 0) {
+    problems.push('no report path recorded, so the audit cannot be re-read')
+  }
+  return problems
 }
 
 function normalizeFindings(findings) {
@@ -102,6 +91,31 @@ function normalizeFindings(findings) {
       ? { file: finding, line: null, severity: 'blocker', evidence: '' }
       : finding
   )
+}
+
+/**
+ * Validate every audit verdict against the contract in the plan. The point of an audit is that
+ * someone can check it later, so a verdict with no retrievable report is not a pass — it is an
+ * unrecorded claim, and it blocks the merge exactly like a missing audit does.
+ */
+export function validateVerdicts(folded) {
+  const rows = []
+  for (const task of folded.tasks) {
+    const audited = task.role === 'auditor' || task.verdict != null
+    if (!audited) {
+      continue
+    }
+    const findings = normalizeFindings(task.findings)
+    rows.push({
+      id: task.id,
+      role: task.role,
+      verdict: task.verdict,
+      findings: findings.length,
+      reports: task.reportPaths,
+      problems: verdictContractProblems(task.verdict, findings, task.reportPaths.length)
+    })
+  }
+  return rows
 }
 
 /**
@@ -305,6 +319,48 @@ export function executeMerge(plan, repo, { rebase = false } = {}) {
   return { merged, conflict: null, outcome: 'merged' }
 }
 
+/**
+ * Record a worker's own completion into the ledger.
+ *
+ * This closes the loop the merge gate depends on: the gate reads verdicts, findings, reports and
+ * touched files out of the ledger, and without a writer for `worker_done` those fields are never
+ * there, so every real run would report "landed without an audit verdict" forever. The contract is
+ * checked here, where the data enters, so a contradictory verdict is refused at the moment it is
+ * written rather than surfacing as a closed gate three steps later.
+ */
+export function buildDoneEntry(input) {
+  const findings = input.finding.map((raw) => {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return {
+      file: parsed.file ?? null,
+      line: parsed.line ?? null,
+      severity: parsed.severity ?? null,
+      evidence: parsed.evidence ?? null
+    }
+  })
+  const entry = {
+    run: input.run,
+    event: 'worker-done',
+    task: input.task,
+    role: input.role ?? null,
+    dispatch: input.dispatch ?? null,
+    state: input.state ?? 'completed',
+    outcome: input.outcome ?? null,
+    verdict: input.verdict ?? null,
+    findings,
+    reportPath: input.report ?? null,
+    filesModified: input.file,
+    deps: input.dep
+  }
+  if (entry.verdict || input.role === 'auditor') {
+    const problems = verdictContractProblems(entry.verdict, findings, input.report ? 1 : 0)
+    if (problems.length > 0) {
+      throw new Error(`verdict contract violated: ${problems.join('; ')}`)
+    }
+  }
+  return entry
+}
+
 export function renderVerify(result) {
   const lines = ['AUDIT VERDICTS']
   if (result.rows.length === 0) {
@@ -365,28 +421,67 @@ function parseArgs(argv) {
     }
     const key = argv[i].slice(2)
     const next = argv[i + 1]
-    if (next === undefined || next.startsWith('--')) {
-      args[key] = true
-    } else {
-      args[key] = next
+    const value = next === undefined || next.startsWith('--') ? true : next
+    if (value !== true) {
       i++
     }
+    // Repeated flags collect: --file a --file b has to mean two files, not the last one twice.
+    args[key] = key in args ? [].concat(args[key], value) : value
   }
   return args
+}
+
+function asList(value) {
+  if (value === undefined) {
+    return []
+  }
+  return Array.isArray(value) ? value : [value]
+}
+
+/** Flags that repeat are the multi-value ones; everything else is taken last-wins. */
+function doneInput(args) {
+  return {
+    run: args.run,
+    task: args.task,
+    role: asList(args.role).at(-1) ?? null,
+    dispatch: asList(args.dispatch).at(-1) ?? null,
+    state: asList(args.state).at(-1) ?? 'completed',
+    outcome: asList(args.outcome).at(-1) ?? null,
+    verdict: asList(args.verdict).at(-1) ?? null,
+    report: asList(args.report).at(-1) ?? null,
+    file: asList(args.file),
+    finding: asList(args.finding),
+    dep: asList(args.dep)
+  }
 }
 
 function main() {
   const [command, ...rest] = process.argv.slice(2)
   const args = parseArgs(rest)
-  const ledgerPath = resolve(args.ledger ?? '')
+
+  if (command === 'record-done') {
+    const input = doneInput(args)
+    try {
+      const entry = buildDoneEntry(input)
+      const ledgerPath = resolve(args.ledger ?? defaultLedgerPath(input.run))
+      appendEntry(ledgerPath, normalizeEntry(entry))
+      process.stdout.write(`recorded ${input.task} -> ${ledgerPath}\n`)
+    } catch (error) {
+      process.stderr.write(`${error.message}\n`)
+      process.exitCode = 1
+    }
+    return
+  }
+
   if (!args.ledger) {
     process.stderr.write(
-      'usage: orchestration-merge-gate.mjs <verify|merge> --ledger <path> [--repo <path> --base <ref>]\n'
+      'usage: orchestration-merge-gate.mjs <record-done|verify|merge> --ledger <path> [--repo <path> --base <ref>]\n'
     )
     process.exitCode = 1
     return
   }
 
+  const ledgerPath = resolve(args.ledger)
   const view = buildView(readLedger(ledgerPath))
 
   if (command === 'verify') {
