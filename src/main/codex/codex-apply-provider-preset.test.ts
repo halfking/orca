@@ -94,4 +94,51 @@ describe('codex-apply-provider-preset', () => {
     const twice = renderCodexConfigForPreset(once, 'kaixuan-local')
     expect(twice).toBe(once)
   })
+
+  // --- Codex schema conformance (defects found 2026-09-28) ---
+  //
+  // These lock the exact shapes that were wrong before, so a future edit cannot
+  // silently reintroduce a config Codex accepts-but-cannot-authenticate.
+
+  it('sets requires_openai_auth = false so Codex does not hijack ChatGPT OAuth', () => {
+    // Why: on a host whose ~/.codex/auth.json has auth_mode "chatgpt",
+    // requires_openai_auth = true routes the gateway request through the OpenAI
+    // auth flow with a ChatGPT token that has no scope for kaixuan -> 401
+    // "Missing scopes: api.responses.write". The user's own proven-working
+    // [model_providers.custom] table uses false.
+    applyCodexKaixuanPreset('kaixuan-kxpms')
+    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
+    expect(written).toContain('requires_openai_auth = false')
+    expect(written).not.toContain('requires_openai_auth = true')
+  })
+
+  it('embeds the caller-supplied key as experimental_bearer_token, never as api_key', () => {
+    // Why: `api_key` is not a field in Codex's [model_providers.<id>] schema.
+    // Writing it produced a config that parsed fine but dropped the token, so
+    // Codex fell back to env_key alone and failed when the var was unset.
+    applyCodexKaixuanPreset('kaixuan-kxpms', { apiKey: 'sk-test-token' })
+    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
+    expect(written).toContain('experimental_bearer_token = "sk-test-token"')
+    expect(written).not.toMatch(/^api_key\s*=/m)
+  })
+
+  it('drops a previously embedded token when switching presets or clearing', () => {
+    const configPath = join(workingHome, 'config.toml')
+    applyCodexKaixuanPreset('kaixuan-local', { apiKey: 'sk-local-secret' })
+    applyCodexKaixuanPreset('kaixuan-kxpms', { apiKey: 'sk-kxpms-secret' })
+    let written = readFileSync(configPath, 'utf-8')
+    expect(written).toContain('experimental_bearer_token = "sk-kxpms-secret"')
+    // A stale token from the previous preset must never survive the switch.
+    expect(written).not.toContain('sk-local-secret')
+    applyCodexKaixuanPreset(null)
+    written = readFileSync(configPath, 'utf-8')
+    expect(written).not.toContain('experimental_bearer_token')
+    expect(written).not.toContain('sk-kxpms-secret')
+  })
+
+  it('escapes TOML-special characters in an embedded bearer token', () => {
+    applyCodexKaixuanPreset('kaixuan-kxpms', { apiKey: 'sk-a"b\\c' })
+    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
+    expect(written).toContain('experimental_bearer_token = "sk-a\\"b\\\\c"')
+  })
 })

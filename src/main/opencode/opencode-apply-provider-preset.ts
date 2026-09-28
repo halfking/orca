@@ -56,13 +56,22 @@ export function applyKaixuanToOpenCodeConfig(
     // not at the top of the provider entry. We use the opencode-documented
     // `{env:VAR}` placeholder so the user's OPENAI_API_KEY env var resolves at
     // opencode startup — matches what opencode's /connect flow writes.
+    //
+    // Why `models` is mandatory: a provider entry with no `models` map is never
+    // registered by opencode — `opencode models <id>` replies `Provider not found`.
+    // Verified live against opencode 1.14.33 on 2026-09-28: the identical entry
+    // without `models` failed to resolve, and with it the model listed and a real
+    // inference call round-tripped.
     provider[presetProviderKey] = {
       npm: '@ai-sdk/openai-compatible',
       name: preset.codexProviderName,
       options: {
         baseURL: preset.opencodeBaseUrl,
         apiKey: apiKeyPlaceholder
-      }
+      },
+      models: Object.fromEntries(
+        preset.opencodeModelIds.map((modelId) => [modelId, { name: modelId }])
+      )
     }
   }
   next.provider = provider
@@ -78,7 +87,8 @@ export function readActiveOpenCodeKaixuanPreset(config: unknown): KaixuanPresetI
   }
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: config.provider passed isRecord() above; the cast widens unknown → Record<string, unknown> for the bracket lookup.
   const provider = config.provider as Record<string, unknown>
-  for (const id of Object.keys(KAIXUAN_PRESETS) as KaixuanPresetId[]) { // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Object.keys returns string[]; the cast only narrows to the union of known preset ids for the dispatch table.
+  for (const id of Object.keys(KAIXUAN_PRESETS) as KaixuanPresetId[]) {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Object.keys returns string[]; the cast only narrows to the union of known preset ids for the dispatch table.
     const providerKey = `kaixuan-${id.split('-')[1]}`
     const entry = provider[providerKey]
     if (

@@ -27,7 +27,21 @@ function joinTomlBlocks(blocks: string[]): string {
   return blocks.filter((block) => block.length > 0).join('\n')
 }
 
-/** Render `[model_providers.<id>]` table content for the given preset. */
+/** Render `[model_providers.<id>]` table content for the given preset.
+ *
+ *  Why `requires_openai_auth = false`: the kaixuan gateway authenticates with its
+ *  own bearer token, NOT with OpenAI/ChatGPT OAuth. Setting this to true tells
+ *  Codex to authenticate the provider through the OpenAI auth flow, which — on a
+ *  host whose `~/.codex/auth.json` carries `auth_mode: "chatgpt"` — routes the
+ *  request with a ChatGPT token that has no scope for the gateway and fails 401
+ *  (`Missing scopes: api.responses.write`). The user's own proven-working
+ *  `[model_providers.custom]` table uses `requires_openai_auth = false`.
+ *
+ *  `env_key` alone is only honoured when the named variable is exported in the
+ *  shell that spawns the codex worker; when the caller passes an explicit key we
+ *  additionally emit `experimental_bearer_token`, the documented field for a
+ *  direct bearer token (see Codex "Configuration Reference — model_providers").
+ */
 function renderProviderTable(preset: KaixuanPresetDefinition): string {
   const lines = [
     `[model_providers.${preset.modelProviderName}]`,
@@ -35,7 +49,7 @@ function renderProviderTable(preset: KaixuanPresetDefinition): string {
     `base_url = "${preset.codexBaseUrl}"`,
     `env_key = "${preset.envKeyName}"`,
     `wire_api = "responses"`,
-    `requires_openai_auth = true`
+    `requires_openai_auth = false`
   ]
   return lines.join('\n')
 }
@@ -139,14 +153,17 @@ export function applyCodexKaixuanPreset(
     if (current === next) {
       return { agentId: 'codex', configPath, presetId, error: null }
     }
-    // apiKey plumbing: when caller supplied an env_key override, embed it inline so
-    // Codex can resolve the literal token. Stored-encrypted-equivalent here is "the
-    // user chose to embed"; future hardening can swap to a keytar-backed value.
+    // apiKey plumbing: when the caller supplied an explicit token, embed it as
+    // `experimental_bearer_token` — the Codex-documented field for a direct
+    // bearer token. The previous shape wrote `api_key = "..."`, which is NOT a
+    // field in the Codex `[model_providers.<id>]` schema at all, so the token was
+    // silently dropped and codex fell back to env_key alone (see Codex
+    // "Configuration Reference — model_providers.<id>").
     const withEnvOverride =
       options?.apiKey && presetId !== null
         ? next.replace(
             new RegExp(`(env_key = "${KAIXUAN_PRESETS[presetId].envKeyName}")`),
-            `$1\napi_key = "${escapeTomlBasicString(options.apiKey)}"`
+            `$1\nexperimental_bearer_token = "${escapeTomlBasicString(options.apiKey)}"`
           )
         : next
     writeFileSync(configPath, withEnvOverride, 'utf-8')

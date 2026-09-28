@@ -115,6 +115,34 @@ describe('opencode-apply-provider-preset', () => {
     expect(inputProvider['kaixuan-local']).toBeUndefined()
   })
 
+  // --- OpenCode schema conformance (defect found 2026-09-28, verified live) ---
+  it('always writes a non-empty models map so opencode registers the provider', () => {
+    // Why: opencode 1.14.33 does NOT register a provider entry that has no
+    // `models` map — `opencode models kaixuan-kxpms` answers "Provider not found".
+    // The same entry WITH `models` listed the model and completed a real
+    // inference call. So this is load-bearing, not decoration.
+    applyOpenCodeKaixuanPreset('kaixuan-kxpms')
+    const configPath = join(workingHome, '.config', 'opencode', 'opencode.json')
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: parsed JSON narrowed to the provider map shape the test inspects.
+    const written = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      provider: Record<string, { models?: Record<string, unknown> }>
+    }
+    const models = written.provider['kaixuan-kxpms'].models
+    expect(models).toBeDefined()
+    expect(Object.keys(models ?? {}).length).toBeGreaterThan(0)
+    expect(models?.['claude-sonnet-4-6']).toEqual({ name: 'claude-sonnet-4-6' })
+  })
+
+  it('writes the models map for the local preset too', () => {
+    applyOpenCodeKaixuanPreset('kaixuan-local')
+    const configPath = join(workingHome, '.config', 'opencode', 'opencode.json')
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: parsed JSON narrowed to the provider map shape the test inspects.
+    const written = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      provider: Record<string, { models?: Record<string, unknown> }>
+    }
+    expect(Object.keys(written.provider['kaixuan-local'].models ?? {}).length).toBeGreaterThan(0)
+  })
+
   it('readActiveOpenCodeKaixuanPreset parses the new options shape', () => {
     expect(
       readActiveOpenCodeKaixuanPreset({

@@ -28,7 +28,31 @@ export type KaixuanPresetDefinition = {
   opencodeBaseUrl: string
   /** OpenCode provider.<id>.apiKey 字段从环境变量读取时的变量名 */
   envKeyName: string
+  /**
+   * OpenCode provider.<id>.models 的 key 列表。
+   *
+   * Why this is mandatory (verified 2026-09-28 against opencode 1.14.33):
+   * a provider entry without `models` is NOT registered — `opencode models <id>`
+   * answers `Provider not found: <id>`. So a config carrying only
+   * `{npm, name, options}` parses fine and still leaves the agent unusable.
+   */
+  opencodeModelIds: readonly string[]
 }
+
+/** 两个 preset 共用的 model 目录。取自用户已在生产验证的 kaixuan 模型清单。 */
+const KAIXUAN_MODEL_IDS: readonly string[] = [
+  'claude-opus-4-8',
+  'claude-sonnet-4-6',
+  'glm-5.1',
+  'glm-5.2',
+  'gpt-5.4',
+  'gpt-5.5',
+  'mimo-v2.5',
+  'mimo-v2.5-pro',
+  'minimax-m2.7',
+  'minimax-m2.7-quickspeed',
+  'minimax-m3'
+]
 
 /** 两个 kaixuan preset 都在这里 hard-code，作为 SSOT。 */
 export const KAIXUAN_PRESETS: Readonly<Record<KaixuanPresetId, KaixuanPresetDefinition>> = {
@@ -40,7 +64,8 @@ export const KAIXUAN_PRESETS: Readonly<Record<KaixuanPresetId, KaixuanPresetDefi
     codexBaseUrl: 'http://127.0.0.1:8782/v1',
     claudeBaseUrl: 'http://127.0.0.1:8782',
     opencodeBaseUrl: 'http://127.0.0.1:8782/v1',
-    envKeyName: 'OPENAI_API_KEY'
+    envKeyName: 'OPENAI_API_KEY',
+    opencodeModelIds: KAIXUAN_MODEL_IDS
   },
   'kaixuan-kxpms': {
     id: 'kaixuan-kxpms',
@@ -50,7 +75,8 @@ export const KAIXUAN_PRESETS: Readonly<Record<KaixuanPresetId, KaixuanPresetDefi
     codexBaseUrl: 'https://llm.kxpms.cn/v1',
     claudeBaseUrl: 'https://llm.kxpms.cn',
     opencodeBaseUrl: 'https://llm.kxpms.cn/v1',
-    envKeyName: 'OPENAI_API_KEY'
+    envKeyName: 'OPENAI_API_KEY',
+    opencodeModelIds: KAIXUAN_MODEL_IDS
   }
 }
 

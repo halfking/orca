@@ -163,7 +163,7 @@ function KaixuanAccountsSection(): React.JSX.Element {
         <span>
           {translate(
             'auto.components.settings.AccountsPane.kaixuanCaveat',
-            'Read before enabling. The kxpms gateway ships an OpenAI Responses endpoint; ClaudeCode walks the Anthropic /v1/messages protocol. Apply will write the right base URL into ~/.claude/settings.json, but ClaudeCode worker calls may 404/501 against the upstream until the gateway team exposes an Anthropic-compatible route. Codex and OpenCode both speak OpenAI Responses and work as soon as OPENAI_API_KEY is set in the shell that runs the agent.'
+            'Read before enabling. Both gateways were verified end-to-end against the real CLIs on 2026-09-28: Codex and OpenCode over the OpenAI Responses route, ClaudeCode over the Anthropic /v1/messages route. Codex needs requires_openai_auth = false — with it true, a host logged in via ChatGPT routes the request through the OpenAI auth flow and fails 401. ClaudeCode reads ANTHROPIC_AUTH_TOKEN literally from settings.json (no ${VAR} expansion), so the key must be supplied above. Apply takes effect on the next CLI session; running workers keep their existing config until they exit.'
           )}
         </span>
       </div>
@@ -234,7 +234,7 @@ function KaixuanAccountsSection(): React.JSX.Element {
         onApply={(presetId) => applyPreset('claude', presetId, setClaude)}
         caveat={translate(
           'auto.components.settings.AccountsPane.kaixuanAgentClaudeCaveat',
-          'Writes ANTHROPIC_BASE_URL into ~/.claude/settings.json. Provide the inline API key above to also embed ANTHROPIC_AUTH_TOKEN — otherwise ClaudeCode must inherit it from the shell that runs it.'
+          'Writes ANTHROPIC_BASE_URL into ~/.claude/settings.json. Verified live against claude 2.1.90 on 2026-09-28 — the gateway answers /v1/messages and a real -p run completed. Provide the inline API key above to also embed ANTHROPIC_AUTH_TOKEN; settings.json does not expand ${VAR}, so the token is sent literally.'
         )}
       />
       <AgentPresetCard
@@ -247,7 +247,7 @@ function KaixuanAccountsSection(): React.JSX.Element {
         onApply={(presetId) => applyPreset('opencode', presetId, setOpenCode)}
         caveat={translate(
           'auto.components.settings.AccountsPane.kaixuanAgentOpencodeCaveat',
-          'Writes provider.kaixuan-<id> with options.baseURL + options.apiKey. OpenCode uses {env:OPENAI_API_KEY} when the inline key is blank — make sure the shell running opencode has it exported.'
+          'Writes provider.kaixuan-<id> with options.baseURL + options.apiKey plus a models map. OpenCode ignores a provider entry with no models map (it reports "Provider not found"), so the map is required. OpenCode uses {env:OPENAI_API_KEY} when the inline key is blank — make sure the shell running opencode has it exported.'
         )}
       />
     </section>
