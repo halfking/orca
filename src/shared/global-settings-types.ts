@@ -22,6 +22,7 @@ import type {
   CodexManagedAccountRuntimeSelection
 } from './managed-account-types'
 import type { NotificationSettings } from './notification-settings-types'
+import type { KaixuanPresetId } from './provider-preset-types'
 import type { CtrlTabOrderMode } from './tab-types'
 import type { TerminalColorOverrides } from './terminal-color-overrides'
 import type { TerminalQuickCommand } from './terminal-quick-command-types'
@@ -401,6 +402,17 @@ export type GlobalSettings = {
   geminiCliOAuthEnabled: boolean
   /** Per-agent CLI command overrides. A missing key means use the catalog default binary name. */
   agentCmdOverrides: Partial<Record<TuiAgent, string>>
+  /**
+   * Currently active kaixuan provider preset for Codex (null = no preset applied,
+   * Codex reads its system default model_provider). Persisted so the AccountsPane
+   * kaixuan section can show the active chip and the IPC handler can re-apply on
+   * demand. See src/shared/provider-preset-types.ts.
+   */
+  codexKaixuanPreset: KaixuanPresetId | null
+  /** Same as codexKaixuanPreset but targets ClaudeCode's ~/.claude/settings.json env injection. */
+  claudeKaixuanPreset: KaixuanPresetId | null
+  /** Same as codexKaixuanPreset but targets OpenCode's opencode.json providers map. */
+  opencodeKaixuanPreset: KaixuanPresetId | null
   /** Custom CODEX_HOME for Codex session-history discovery (defaults to ~/.codex).
    *  History-only: does not change which account/config/hooks Orca uses. */
   codexSessionSourceHome?: {

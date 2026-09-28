@@ -196,6 +196,57 @@ export const getAccountsMiniMaxSearchEntries = createLocalizedCatalog(() => [
   }
 ])
 
+export const getAccountsKaixuanSearchEntries = createLocalizedCatalog(() => [
+  {
+    title: translate(
+      'auto.components.settings.accounts.search.kaixuanTitle',
+      'Kaixuan provider preset'
+    ),
+    description: translate(
+      'auto.components.settings.accounts.search.kaixuanDescription',
+      'Switch Codex / ClaudeCode / OpenCode to a Kaixuan gateway (local http://127.0.0.1:8782 or remote https://llm.kxpms.cn). One-click apply writes the matching provider block into each agent’s system config.'
+    ),
+    keywords: [
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanKeyword',
+        'kaixuan'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanKxpmsKeyword',
+        'kxpms'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanLocalKeyword',
+        'kaixuan local'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanRemoteKeyword',
+        'kaixuan kxpms'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanGatewayKeyword',
+        'gateway'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanLlmKeyword',
+        'llm.kxpms.cn'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanLoopbackKeyword',
+        '127.0.0.1:8782'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanProviderKeyword',
+        'provider preset'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.kaixuanOpenaiKeyword',
+        'openai compatible'
+      )
+    ]
+  }
+])
+
 export const getAccountsGrokSearchEntries = createLocalizedCatalog(() => [
   {
     title: translate('auto.components.settings.accounts.search.f4a8c2e1b7', 'Grok (xAI) Usage'),
@@ -224,5 +275,6 @@ export const getAccountsPaneSearchEntries = createLocalizedCatalog((): SettingsS
   ...getAccountsGeminiSearchEntries(),
   ...getAccountsOpencodeSearchEntries(),
   ...getAccountsMiniMaxSearchEntries(),
+  ...getAccountsKaixuanSearchEntries(),
   ...getAccountsGrokSearchEntries()
 ])

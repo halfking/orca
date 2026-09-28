@@ -3093,7 +3093,7 @@
             "missing": {
               "tui": {
                 "title": "This ZCode build has no terminal UI",
-                "description": "Orca's hooks installed correctly \u2014 the zcode on your PATH just cannot open a session. The ZCode desktop app bundles the agent runtime without its terminal UI. Install a zcode that ships the TUI, then run zcode outside Orca to confirm."
+                "description": "Orca's hooks installed correctly — the zcode on your PATH just cannot open a session. The ZCode desktop app bundles the agent runtime without its terminal UI. Install a zcode that ships the TUI, then run zcode outside Orca to confirm."
               }
             }
           },
@@ -6509,7 +6509,20 @@
               "placeholder": "/connect 또는 OPENCODE_API_KEY로 저장된 키를 사용하려면 비워 두세요",
               "help": "상태 표시줄의 OpenCode Go 사용량 표시에 사용됩니다. 아래 세션 쿠키는 레거시 콘솔(OpenCode Black) 계정에만 필요합니다."
             }
-          }
+          },
+          "kaixuanTitle": "Kaixuan provider preset",
+          "kaixuanDescription": "Switch the active model provider for Codex, ClaudeCode, and OpenCode to one of the two Kaixuan gateways. Endpoints live in ~/.codex/config.toml, ~/.claude/settings.json, and ~/.config/opencode/opencode.json respectively; nothing leaves this device. Apply restarts the next CLI session — already-running workers keep using their existing config until they exit.",
+          "kaixuanApiUnavailable": "The provider-preset bridge is not exposed in this build. Reinstall Orca after the next release ships.",
+          "kaixuanAgentCodex": "Codex",
+          "kaixuanAgentClaude": "ClaudeCode",
+          "kaixuanAgentOpencode": "OpenCode",
+          "kaixuanAgentTitle": "Provider for {{agent}}",
+          "kaixuanAgentDescription": "Pick a Kaixuan gateway or clear the active preset. Currently active: {{presetLabel}}. Config file: {{configPath}}.",
+          "kaixuanNoPreset": "system default",
+          "kaixuanConfigNotLoaded": "not loaded",
+          "kaixuanActiveBadge": "active",
+          "kaixuanClearButton": "Clear (revert to system default)",
+          "kaixuanButtonActive": "Active: {{label}}"
         },
         "AdvancedPane": {
           "40b29e0bf3": "다시 시작",
@@ -8863,7 +8876,18 @@
             "b2c4e7f1a8": "끝점",
             "3a9b6d2c4e": "API 키",
             "5d8f1a3b7c": "중국",
-            "7e2a4b8c1d": "해외"
+            "7e2a4b8c1d": "해외",
+            "kaixuanTitle": "Kaixuan provider preset",
+            "kaixuanDescription": "Switch Codex / ClaudeCode / OpenCode to a Kaixuan gateway (local http://127.0.0.1:8782 or remote https://llm.kxpms.cn). One-click apply writes the matching provider block into each agent’s system config.",
+            "kaixuanKeyword": "kaixuan",
+            "kaixuanKxpmsKeyword": "kxpms",
+            "kaixuanLocalKeyword": "kaixuan local",
+            "kaixuanRemoteKeyword": "kaixuan kxpms",
+            "kaixuanGatewayKeyword": "gateway",
+            "kaixuanLlmKeyword": "llm.kxpms.cn",
+            "kaixuanLoopbackKeyword": "127.0.0.1:8782",
+            "kaixuanProviderKeyword": "provider preset",
+            "kaixuanOpenaiKeyword": "openai compatible"
           }
         },
         "advanced": {

@@ -9,6 +9,7 @@ import { registerFilesystemHandlers } from '../filesystem'
 import type { CommitMessageAgentEnvironmentResolvers } from '../../text-generation/commit-message-agent-environment'
 import { registerFilesystemWatcherHandlers } from '../filesystem-watcher'
 import { registerUsageProviderHandlers } from '../usage-provider-handlers'
+import { registerProviderPresetHandlers } from '../provider-preset-handlers'
 import { registerGitHubHandlers } from '../github'
 import { registerGitLabHandlers } from '../gitlab'
 import { registerHostedReviewHandlers } from '../hosted-review'
@@ -145,6 +146,7 @@ export function registerCoreHandlers(
   registerCliHandlers()
   registerPreflightHandlers()
   registerUsageProviderHandlers({ claudeUsage, codexUsage, openCodeUsage, museUsage })
+  registerProviderPresetHandlers()
   registerCodexAccountHandlers(codexAccounts, () => store.getSettings())
   registerAgentHookHandlers(runtime, { getPtyIdForPaneKey })
   registerCodexConfigSyncHandlers(codexAccounts.runtimeHomeService)
