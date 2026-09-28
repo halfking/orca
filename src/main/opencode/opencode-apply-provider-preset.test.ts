@@ -257,4 +257,48 @@ describe('opencode-apply-provider-preset', () => {
     expect(providerMap['glm-5.2'].options?.baseURL).toBe('https://api.z.ai/api/coding/paas/v4')
     expect(providerMap['glm-5.2'].options?.apiKey).toBe('{env:OPENAI_API_KEY}')
   })
+
+  // --- regression: applying a preset must never destroy the user's own config ---
+
+  it('preserves unrelated top-level keys when applying a preset over a real config', () => {
+    const configPath = join(workingHome, '.config', 'opencode', 'opencode.json')
+    mkdirSync(join(workingHome, '.config', 'opencode'), { recursive: true })
+    writeFileSync(
+      configPath,
+      `${JSON.stringify(
+        {
+          theme: 'tokyonight',
+          model: 'anthropic/claude-sonnet-4',
+          mcp: { myserver: { type: 'local', command: ['node', 'server.js'] } },
+          permission: { edit: 'ask' }
+        },
+        null,
+        2
+      )}\n`,
+      'utf-8'
+    )
+    const result = applyOpenCodeKaixuanPreset('kaixuan-local')
+    expect(result.error).toBeNull()
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: JSON.parse yields unknown; the cast narrows to Record for these four field lookups.
+    const written = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>
+    expect(written.theme).toBe('tokyonight')
+    expect(written.model).toBe('anthropic/claude-sonnet-4')
+    expect(written.mcp).toEqual({ myserver: { type: 'local', command: ['node', 'server.js'] } })
+    expect(written.permission).toEqual({ edit: 'ask' })
+  })
+
+  it('refuses to overwrite a malformed opencode.json instead of wiping it', () => {
+    const configPath = join(workingHome, '.config', 'opencode', 'opencode.json')
+    mkdirSync(join(workingHome, '.config', 'opencode'), { recursive: true })
+    // A truncated / hand-edited file. Everything the user owns is in here.
+    const broken = '{\n  "theme": "tokyonight",\n  "mcp": { "a": 1\n'
+    writeFileSync(configPath, broken, 'utf-8')
+
+    const result = applyOpenCodeKaixuanPreset('kaixuan-local')
+
+    // The apply must fail loudly...
+    expect(result.error).toBeTruthy()
+    // ...and the file on disk must be byte-identical to what the user had.
+    expect(readFileSync(configPath, 'utf-8')).toBe(broken)
+  })
 })

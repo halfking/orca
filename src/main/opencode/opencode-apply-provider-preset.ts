@@ -125,10 +125,23 @@ export function applyOpenCodeProvider(
     mkdirSync(dirname(configPath), { recursive: true })
     let current: unknown = {}
     if (existsSync(configPath)) {
+      const raw = readFileSync(configPath, 'utf-8')
       try {
-        current = JSON.parse(readFileSync(configPath, 'utf-8'))
-      } catch {
-        current = {}
+        current = JSON.parse(raw)
+      } catch (error) {
+        // Why fail closed: this file holds every OpenCode setting the user owns
+        // (theme, model, mcp servers, permissions, agents, instructions). If it
+        // does not parse we cannot merge into it, and the old behaviour —
+        // `current = {}` then writeFileSync — silently replaced the whole file
+        // with a bare `{ provider: ... }`, destroying all of it with no error
+        // surfaced. Refuse the write and let the user repair the file; the
+        // Codex path never had this hazard because it rewrites TOML textually.
+        return {
+          agentId: 'opencode',
+          configPath,
+          providerId: provider?.id ?? null,
+          error: `Refusing to overwrite ${configPath}: existing file is not valid JSON (${error instanceof Error ? error.message : String(error)}). Fix or move the file, then retry.`
+        }
       }
     }
     const apiKeyPlaceholder =
