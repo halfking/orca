@@ -20,6 +20,8 @@ Audit docs:
 | Orchestration revert caused by v4 merge                       | fixed, `3b1ca1312`                                      |
 | AGENTS.md pointer to the audit + two smoke-test rules          | done, `c49527537`                                       |
 | Live e2e smoke for custom dotted-id across Codex + ClaudeCode + OpenCode | done, `b7f7410db`, mutation-checked against `b2cc5f8c4` + `40f9210d9` |
+| Settings caveat still claimed ClaudeCode 404/501 (disproven 2026-09-28, fixed 2026-09-29) | fixed, all 6 locales |
+| Live-test binary paths overridable (`ORCA_CODEX_BIN` etc.)          | done, audit round 3                                  |
 
 `origin/main` and `origin/feat/kaixuan-v4-custom-providers` will sit at `b7f7410db` once the
 push lands. No uncommitted work remains on the branch's primary files (`.DS_Store` in
@@ -73,6 +75,23 @@ regex, and `codex-apply-provider-preset.test.ts` parses the written header with
 `parseTomlTableHeaderPath` to prove what Codex's TOML layer actually sees. The
 unit test now fails against the pre-fix source by `git stash push -- <file>`.
 
+**Correction (2026-09-29).** That mutation recipe is wrong once the fix is
+committed. `git stash push -- <file>` on a clean tree stashes nothing, prints
+no error, and the suite stays green — so the "verified red" claim is
+unreproducible exactly when you most want to re-check it. Mutate the source in
+place instead and restore from a copy:
+
+```bash
+cp src/main/codex/codex-apply-provider-preset.ts /tmp/fix-backup.ts
+# rewrite renderModelProvidersHeader's return to the bare `[model_providers.${id}]`
+npx vitest run --config config/vitest.config.ts \
+  src/main/codex/codex-apply-provider-preset.test.ts src/shared/provider-preset-types.test.ts
+# -> 8 failed / 33 passed, including the structural key-path case
+cp /tmp/fix-backup.ts src/main/codex/codex-apply-provider-preset.ts   # empty `git diff` proves restore
+```
+
+A green suite after a `stash push` on a clean tree is evidence of nothing.
+
 ## Opencode fail-closed fix (50564adda)
 
 This is the most consequential defect found in the audit. `applyOpenCodeProvider`
@@ -93,6 +112,45 @@ keys when applying a preset over a real config` (theme / model / mcp /
 permission survive) and `refuses to overwrite a malformed opencode.json
 instead of wiping it` (the file is byte-identical to what the user had after a
 failing apply).
+
+## What the audit actually found (audit round 3: the doc that lied)
+
+Round 1's audit doc contains the sentence "The caveat was corrected." Re-checking
+the product on 2026-09-29 found `kaixuanCaveat` still carrying the disproven
+`404/501` wording in **all six locales** — the record was corrected, the
+shipped string never was. Re-proved the underlying fact first rather than
+trusting either the old claim or the new one:
+
+| Endpoint | `127.0.0.1:8782` | `llm.kxpms.cn` |
+|---|---|---|
+| `POST /v1/messages` | 200, real reply | 200, real reply |
+| `POST /v1/responses` | 200, real reply | 200, real reply |
+| `GET /v1/models` | 200 | 200 (601 models) |
+
+Both gateways speak both protocols, so the string now says that and keeps the
+caveat that is actually true (blank inline key → env reference → the launching
+shell must export the variable). A 10-model catalog re-check the same day found
+all 10 present upstream and `minimax-m2.7-quickspeed` still absent, so
+`9005b754c`'s removal is still correct.
+
+The live e2e suite's three binary paths were hardcoded, including a
+date-stamped `/tmp` constant that macOS reaps — it would have rotted into a
+permanent failure that reads like a code defect. They are now
+`ORCA_CODEX_BIN` / `ORCA_CLAUDE_BIN` / `ORCA_OPENCODE_BIN` with the same
+defaults. Verified by re-running the suite against a *different* codex install
+(3/3 pass). A missing binary still throws rather than skipping.
+
+**Nine pre-existing test failures, not caused by this work.** `pnpm test` over
+`src/main/codex src/main/claude src/main/opencode src/shared
+src/renderer/src/components/settings` is 14327 passed / 9 failed. All 9
+reproduce at clean HEAD with every change stashed:
+
+- `claude-structured-real-cli.test.ts` (2) — spawns the real claude CLI
+- `SessionHistoryComputerRow.test.tsx` (3), `SessionHistorySettingsPane.test.tsx` (1),
+  `use-session-search-status.test.tsx` (3) — e.g. expecting `3.4K messages`
+  where the code now renders `3400 messages`
+
+Do not spend a round re-diagnosing these as kaixuan regressions.
 
 ## Method worth reusing
 

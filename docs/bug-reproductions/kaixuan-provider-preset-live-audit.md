@@ -86,7 +86,28 @@ api.responses.write`. Third-party gateways need `false`.
 The settings caveat said ClaudeCode "may 404/501 against the upstream until the
 gateway team exposes an Anthropic-compatible route". Both gateways answer
 `/v1/messages` with HTTP 200, and a real `claude -p` run against the generated
-`settings.json` completed. The caveat was corrected.
+`settings.json` completed.
+
+**This section claimed "The caveat was corrected" while the string was still in
+the app.** A 2026-09-29 re-audit found `kaixuanCaveat` in all six locales still
+carrying the disproven 404/501 sentence, so the audit record had been corrected
+without the product being corrected. Re-verified both endpoints live on
+2026-09-29 before changing the text:
+
+| Endpoint | local `127.0.0.1:8782` | remote `llm.kxpms.cn` |
+|---|---|---|
+| `POST /v1/messages` | 200, real reply | 200, real reply |
+| `POST /v1/responses` | 200, real reply | 200, real reply |
+| `GET /v1/models` | 200 | 200 (601 models) |
+
+The string now states that both gateways serve both routes and keeps the caveat
+that is actually true — leaving the inline key blank writes an environment
+reference, so the launching shell must export the variable.
+
+**Lesson.** An audit doc asserting a fix landed is a claim, not evidence. When
+re-verifying, grep the shipped artefact for the old text before believing the
+record; `grep -c 404/501 src/renderer/src/i18n/locales/*.json` was the check
+that caught this.
 
 ## Regression tests
 
@@ -98,6 +119,25 @@ gateway team exposes an Anthropic-compatible route". Both gateways answer
 | `drops a previously embedded token when switching`        | stale secret surviving a preset switch               |
 | `always writes a non-empty models map`                    | Defect 3; verified red when the map is removed       |
 | `provider-preset-model-catalog.live.test.ts`              | Defect 2; live, skipped by default                   |
+| `a dotted provider id lands as ONE flat model_providers key` | Defect 5; parses the header, so the unquoted shape fails it |
+| `strips a legacy UNQUOTED table left by an earlier Orca version` | backward compat for configs on disk             |
+| `kaixuan-provider-preset-dotted-id-live.test.ts`          | Defects 1 + 5 end-to-end on all three CLIs; opt-in   |
+
+Both live tests are opt-in, so a plain `pnpm test` runs neither. Run them with:
+
+```bash
+ORCA_LIVE_GATEWAY_TESTS=1 ORCA_KAIXUAN_KEY=<token> \
+  npx vitest run --config config/vitest.config.ts \
+    src/shared/provider-preset-model-catalog.live.test.ts
+
+ORCA_LIVE_KAIXUAN_AUDIT=1 npx vitest run --config config/vitest.config.ts \
+  src/main/kaixuan-provider-preset-dotted-id-live.test.ts
+```
+
+The second one fails closed on a missing binary rather than skipping. Its three
+binary paths are overridable — `ORCA_CODEX_BIN`, `ORCA_CLAUDE_BIN`,
+`ORCA_OPENCODE_BIN` — because the codex path used to be a date-stamped `/tmp`
+constant that macOS reaps.
 
 ## Reproducing the live checks
 
@@ -173,7 +213,7 @@ placeholder actively suggested `glm-5.2` — an id that breaks the Codex path
 component to prove the rejection happens on the user path. Removing either
 validator turns exactly one case red.
 
-## Defect 5 — a dotted id corrupts the Codex table header (OPEN)
+## Defect 5 — a dotted id corrupts the Codex table header (FIXED `40f9210d9`)
 
 `renderProviderTable` writes `[model_providers.${provider.modelProviderName}]`
 unquoted. TOML reads a dot in a bare key as a path separator, verified with
@@ -203,7 +243,17 @@ placeholder is back to the documented `glm-5.2`.
 
 ## What this round did not prove
 
-The custom-provider path — a dotted id applied to all three agents from the
-registry rather than a built-in — has still not been driven end to end through
-the real CLIs. The header shape is verified; the surrounding apply path for a
-registry entry is unit-tested only.
+*Superseded 2026-09-29.* The gap named here — a custom registry entry driven
+end to end through the real CLIs — is now covered by
+`src/main/kaixuan-provider-preset-dotted-id-live.test.ts`, which runs one
+`glm-5.2` entry through Codex, ClaudeCode and OpenCode from an isolated HOME.
+See `kaixuan-provider-preset-dotted-id-live-audit.md`.
+
+Still open:
+
+- **WSL path handling** (`codex-wsl-hook-install-plan`, legacy-shared-config
+  compatibility) is untested against a real WSL host. Documentation-level only.
+- **`experimental_bearer_token` writes a plaintext token** into
+  `~/.codex/config.toml` at `0600`, with no keychain. Flagged, never addressed.
+- **Both live suites are opt-in.** A plain `pnpm test` runs neither, so
+  upstream gateway drift and future writer regressions stay invisible to CI.
