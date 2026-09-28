@@ -3,6 +3,7 @@ import type { Repo } from '../../shared/repo-types'
 
 const mocks = vi.hoisted(() => ({
   markAntigravityWorkspaceTrusted: vi.fn(),
+  markClaudeWorkspaceTrusted: vi.fn(),
   markCodexProjectTrusted: vi.fn(),
   markCopilotFolderTrusted: vi.fn(),
   markCursorWorkspaceTrusted: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../agent-trust-presets', () => ({
   markAntigravityWorkspaceTrusted: mocks.markAntigravityWorkspaceTrusted,
+  markClaudeWorkspaceTrusted: mocks.markClaudeWorkspaceTrusted,
   markCodexProjectTrusted: mocks.markCodexProjectTrusted,
   markCopilotFolderTrusted: mocks.markCopilotFolderTrusted,
   markCursorWorkspaceTrusted: mocks.markCursorWorkspaceTrusted
@@ -177,6 +179,26 @@ describe('markLocalWorktreeTrusted', () => {
     await markLocalWorktreeTrusted('antigravity', '/workspace/app')
 
     expect(mocks.markAntigravityWorkspaceTrusted).toHaveBeenCalledWith('/workspace/app')
+  })
+
+  /**
+   * Same failure as the agy case above, reached from the other side: `preflightTrust: 'claude'` in
+   * TUI_AGENT_CONFIG only helps if this main-process chain — the one `orchestration worker-start`
+   * actually takes — writes Claude's artifact. Verified live against claude 2.1.90: without it
+   * every supervised Claude worker stalled at agent_readiness on the trust dialog.
+   */
+  it('writes the Claude workspace trust artifact on the orchestration path', async () => {
+    await markLocalWorktreeTrusted('claude', '/workspace/app')
+
+    expect(mocks.markClaudeWorkspaceTrusted).toHaveBeenCalledWith('/workspace/app')
+  })
+
+  it('contains a throwing Claude trust write', async () => {
+    mocks.markClaudeWorkspaceTrusted.mockImplementationOnce(() => {
+      throw new Error('write failed')
+    })
+
+    await expect(markLocalWorktreeTrusted('claude', '/workspace/app')).resolves.toBeUndefined()
   })
 
   it('contains a throwing agy trust write', async () => {

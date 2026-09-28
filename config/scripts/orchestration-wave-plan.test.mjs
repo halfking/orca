@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { assignWaves, compilePlan, shellVarFor, validatePlan } from './orchestration-wave-plan.mjs'
+import {
+  assignWaves,
+  compilePlan,
+  renderShell,
+  shellVarFor,
+  validatePlan
+} from './orchestration-wave-plan.mjs'
 
 function plan(overrides = {}) {
   return {
@@ -356,5 +362,33 @@ describe('compiling a plan into commands', () => {
     // keyed on, and it is written at dispatch time rather than compiled into the entry.
     expect(start.ledger.task).toBeUndefined()
     expect(start.ledger.deps).toEqual([])
+  })
+})
+
+describe('coordinator binding', () => {
+  // Why this group exists: a real run against orca 1.4.197 died on its first dispatch with
+  // `selector_not_found` naming `new-child`, which blames the worktree flag. The real cause was
+  // that no command ever named the Run's coordinator, so the placement could not be resolved.
+  it('puts the coordinator terminal on every dispatch, not just the first', () => {
+    const result = compilePlan(plan())
+    const starts = result.steps.filter((step) => step.kind === 'worker-start')
+    expect(starts.length).toBeGreaterThan(1)
+    for (const start of starts) {
+      expect(start.argv).toContain('--from')
+      expect(start.argv[start.argv.indexOf('--from') + 1]).toBe('$RUN_COORDINATOR')
+    }
+  })
+
+  it('keeps the coordinator reference a shell variable rather than a literal', () => {
+    const script = renderShell(compilePlan(plan()).steps)
+    expect(script).toContain('RUN_COORDINATOR="$(')
+    expect(script).toContain('"$RUN_COORDINATOR"')
+    // A single-quoted reference would address a terminal literally named $RUN_COORDINATOR.
+    expect(script).not.toContain("'$RUN_COORDINATOR'")
+  })
+
+  it('refuses to run a plan whose run-create receipt carries no coordinator', () => {
+    const script = renderShell(compilePlan(plan()).steps)
+    expect(script).toContain('if [ -z "$RUN_COORDINATOR" ]')
   })
 })

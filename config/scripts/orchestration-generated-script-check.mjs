@@ -35,7 +35,7 @@ const flag = (name) => {
 }
 
 if (command === 'run-create') {
-  process.stdout.write(JSON.stringify({ result: { id: 'run_stub', runId: 'run_stub', objective: flag('--objective') } }))
+  process.stdout.write(JSON.stringify({ result: { id: 'run_stub', runId: 'run_stub', coordinator_handle: 'term_stub', objective: flag('--objective') } }))
 } else if (command === 'task-create') {
   const title = flag('--task-title')
   const deps = flag('--deps')
@@ -157,6 +157,24 @@ check(
 check(
   'the merge wave became a gate, not an agent',
   calls.filter((call) => call[1] === 'gate-create').length === 1
+)
+// Verified live on orca 1.4.197: a worker-start without --from is fenced, and the first failure a
+// real run sees is `selector_not_found` on the worktree selector, which blames the wrong flag. A
+// stub that answers every command the same way would pass this file with the bug still in it, so
+// the stub records the argv and this asserts the coordinator handle actually reached the binary.
+const startCalls = calls.filter((call) => call[1] === 'worker-start')
+check(
+  'every dispatch names the coordinator terminal from the run receipt',
+  startCalls.length > 0 &&
+    startCalls.every((call) => {
+      const at = call.indexOf('--from')
+      return at !== -1 && call[at + 1] === 'term_stub'
+    }),
+  startCalls.map((call) => call[call.indexOf('--from') + 1]).join(',')
+)
+check(
+  'no dispatch passes a literal $RUN_COORDINATOR',
+  startCalls.every((call) => !call.includes('$RUN_COORDINATOR'))
 )
 
 // The point of the exercise: --deps must carry the ids task-create actually returned, not the

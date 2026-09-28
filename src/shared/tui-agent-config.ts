@@ -74,6 +74,10 @@ function resolveTuiAgentConfig(source: TuiAgentConfigSource): TuiAgentConfig {
 const TUI_AGENT_CONFIG_SOURCE: Record<TuiAgent, TuiAgentConfigSource> = {
   claude: {
     detectCmd: 'claude',
+    // Why: Claude Code's first-launch trust dialog is answered in the terminal, and a supervised
+    // worker has nobody there to answer it — the dispatch died at agent_readiness with
+    // `agent-trust-workspace` on a live run. Verified: the preset key removes the dialog.
+    preflightTrust: 'claude',
     promptInjectionMode: 'argv',
     pasteNeedsTypedRequest: true,
     // Why: `claude --prefill <text>` seeds the input without submitting, avoiding the paste-after-ready race (PR https://github.com/stablyai/orca/pull/926).
@@ -98,6 +102,7 @@ const TUI_AGENT_CONFIG_SOURCE: Record<TuiAgent, TuiAgentConfigSource> = {
   },
   openclaude: {
     detectCmd: 'openclaude',
+    preflightTrust: 'claude',
     promptInjectionMode: 'argv',
     draftPromptFlag: '--prefill'
   },

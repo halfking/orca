@@ -13,6 +13,7 @@ import { buildAgentDraftLaunchPlan, buildAgentStartupPlan } from '../../shared/t
 import {
   markAntigravityWorkspaceTrusted,
   markCodexProjectTrusted,
+  markClaudeWorkspaceTrusted,
   markCopilotFolderTrusted,
   markCursorWorkspaceTrusted
 } from '../agent-trust-presets'
@@ -196,6 +197,8 @@ export async function markLocalWorktreeTrusted(
   try {
     if (preset === 'cursor') {
       markCursorWorkspaceTrusted(workspacePath)
+    } else if (preset === 'claude') {
+      markClaudeWorkspaceTrusted(workspacePath)
     } else if (preset === 'copilot') {
       markCopilotFolderTrusted(workspacePath)
     } else if (preset === 'codex') {

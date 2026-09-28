@@ -6,7 +6,7 @@ import { getOrcaManagedCodexHomePath } from './codex/codex-home-paths'
 import { upsertProjectTrustLevel } from './codex/config-toml-trust'
 import { runExclusivelyForCodexTrustConfig } from './codex/codex-trust-config-mutation-queue'
 
-export type AgentTrustPreset = 'cursor' | 'copilot' | 'codex' | 'antigravity'
+export type AgentTrustPreset = 'cursor' | 'copilot' | 'codex' | 'antigravity' | 'claude'
 
 /**
  * Pre-mark a workspace as trusted for cursor-agent, GitHub Copilot CLI, or
@@ -151,6 +151,58 @@ export function markAntigravityWorkspaceTrusted(workspacePath: string): void {
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true })
   }
+  writeFileAtomically(configPath, `${JSON.stringify(config, null, 2)}\n`)
+}
+
+/**
+ * Claude Code records an accepted first-launch trust dialog per project in
+ * ~/.claude.json:
+ *   { "projects": { "<realpath>": { "hasTrustDialogAccepted": true } } }
+ *
+ * Verified live against claude 2.1.90: with that key present, `claude -p` in the folder goes
+ * straight to the model request; without it, every supervised worker stalls at agent_readiness
+ * with `agent-trust-workspace`, because a dispatch nobody is watching cannot answer the menu.
+ * There is no CLI equivalent of cursor-agent's `--trust`.
+ *
+ * Why only that one key: ~/.claude.json also holds session history, oauth state and per-project
+ * settings, and Claude rewrites the whole file itself. This writes the minimum that means "this
+ * folder was accepted" and never touches the rest. That also means a Claude process writing the
+ * file at the same moment can win the race and drop this key — the next launch asks once more.
+ * A lost update here is recoverable; refusing to write would strand every Claude worker.
+ */
+export function markClaudeWorkspaceTrusted(workspacePath: string): void {
+  const absPath = canonicalize(workspacePath)
+  const configPath = join(homedir(), '.claude.json')
+  let config: Record<string, unknown> = {}
+  try {
+    if (existsSync(configPath)) {
+      const parsed = JSON.parse(readFileSync(configPath, 'utf-8'))
+      if (parsed && typeof parsed === 'object') {
+        config = parsed as Record<string, unknown>
+      }
+    }
+  } catch {
+    // Why: a corrupted ~/.claude.json is the user's to fix. Rewriting it from a launch path would
+    // trade one broken thing for another, so leave it alone and let the dialog appear.
+    return
+  }
+  const projects =
+    config.projects && typeof config.projects === 'object'
+      ? (config.projects as Record<string, unknown>)
+      : {}
+  const existing = projects[absPath]
+  if (
+    existing &&
+    typeof existing === 'object' &&
+    (existing as { hasTrustDialogAccepted?: unknown }).hasTrustDialogAccepted === true
+  ) {
+    return
+  }
+  projects[absPath] = {
+    ...(existing && typeof existing === 'object' ? existing : {}),
+    hasTrustDialogAccepted: true
+  }
+  config.projects = projects
   writeFileAtomically(configPath, `${JSON.stringify(config, null, 2)}\n`)
 }
 

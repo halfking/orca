@@ -364,6 +364,12 @@ export function compilePlan(plan) {
       if (worktree !== 'current') {
         argv.push('--name', task.id, '--base-branch', taskBase, '--setup', task.setup ?? 'run')
       }
+      // Why --from is not optional: worker-start is fenced to the terminal bound to the Run, and
+      // `--worktree new-child` resolves the coordinator's worktree through that binding. Without it
+      // the first dispatch of a real run dies with `selector_not_found` naming the worktree
+      // selector, which points at the wrong thing entirely — the Run was simply never addressed.
+      // Verified live against orca 1.4.197: identical argv with --from starts; without it, it fails.
+      argv.push('--from', '$RUN_COORDINATOR')
       if (launch.agent) {
         argv.push('--agent', launch.agent)
       }
@@ -426,7 +432,14 @@ function renderCommand(step, { program }) {
       parts.push(`"$${step.taskVar}"`)
       continue
     }
-    parts.push(shellQuote(step.argv[i]))
+    // A compiled value that is itself a shell reference ($RUN_COORDINATOR) must stay a reference:
+    // quoting it as a literal would address a terminal called "$RUN_COORDINATOR".
+    const value = step.argv[i]
+    if (value.startsWith('$')) {
+      parts.push(`"${value}"`)
+      continue
+    }
+    parts.push(shellQuote(value))
   }
   return `${program} ${parts.join(' ')}`
 }
@@ -447,6 +460,14 @@ const PREAMBLE = (ledgerPath) =>
       'process.stdout.write(String(t?.id??t?.taskId??""))\' "$1"',
     '}',
     '',
+    '# Every worker-start is fenced to the terminal bound to this Run, and `--worktree new-child`',
+    '# resolves the coordinator worktree through that same binding. The handle only exists in the',
+    '# run-create receipt, so it is read once here and carried by every dispatch below.',
+    '__orca_coordinator() {',
+    "  node -e 'const j=JSON.parse(process.argv[1]);const r=j?.result??j;" +
+      'process.stdout.write(String(r?.run?.coordinator_handle??r?.coordinator_handle??""))\' "$1"',
+    '}',
+    '',
     '# Merge the live dispatch id and the runtime task id from the receipt into the entry the',
     '# compiler prepared. The plan id stays the key: the DAG, the merge order and every report are',
     '# keyed on it, and a view keyed on runtime ids stops matching the plan that produced them.',
@@ -461,7 +482,7 @@ const PREAMBLE = (ledgerPath) =>
     '}'
   ].join('\n')
 
-function renderShell(steps) {
+export function renderShell(steps) {
   const ledgerPath = resolve(SELF_DIR, 'orchestration-schedule-ledger.mjs')
   const lines = [PREAMBLE(ledgerPath)]
   const runCreate = steps.find((step) => step.kind === 'run-create')
@@ -469,6 +490,15 @@ function renderShell(steps) {
   lines.push('', '# setup — open the Run')
   lines.push(`RUN_RECEIPT="$(${renderCommand(runCreate, { program: '"$ORCA"' })})"`)
   lines.push('RUN_ID="$(__orca_task_id "$RUN_RECEIPT")"')
+  lines.push('RUN_COORDINATOR="$(__orca_coordinator "$RUN_RECEIPT")"')
+  lines.push(
+    '# An empty handle means the Run never recorded a coordinator, and every dispatch below would',
+    '# be fenced. Stop here rather than dispatch four waves that cannot start.',
+    'if [ -z "$RUN_COORDINATOR" ]; then',
+    '  echo "run-create receipt carries no coordinator_handle; worker-start would be fenced" >&2',
+    '  exit 1',
+    'fi'
+  )
 
   for (const wave of [...new Set(steps.filter((s) => s.wave >= 0).map((s) => s.wave))].sort(
     (a, b) => a - b

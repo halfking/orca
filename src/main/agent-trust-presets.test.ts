@@ -40,6 +40,7 @@ vi.mock('node:os', async () => {
 
 const {
   markAntigravityWorkspaceTrusted,
+  markClaudeWorkspaceTrusted,
   markCodexProjectTrusted,
   markCopilotFolderTrusted,
   markCursorWorkspaceTrusted
@@ -207,6 +208,71 @@ describe('markAntigravityWorkspaceTrusted', () => {
       expect(parsed.trustedWorkspaces).toContain(realpathSync(child))
     } finally {
       rmSync(parent, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('markClaudeWorkspaceTrusted', () => {
+  // Why this group: a live dispatch against claude 2.1.90 died at agent_readiness with
+  // `agent-trust-workspace` because nobody was there to accept the first-launch dialog. The preset
+  // is the only unattended path, so it also has to be the one that cannot clobber the rest of the
+  // file — ~/.claude.json holds session history and oauth state Claude rewrites itself.
+  it('records the accepted trust dialog for the workspace', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'orca-claude-ws-'))
+    try {
+      markClaudeWorkspaceTrusted(workspace)
+      const configPath = join(testState.fakeHomeDir, '.claude.json')
+      expect(existsSync(configPath)).toBe(true)
+      const parsed = JSON.parse(readFileSync(configPath, 'utf-8'))
+      expect(parsed.projects[realpathSync(workspace)].hasTrustDialogAccepted).toBe(true)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves every other key in ~/.claude.json untouched', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'orca-claude-ws-'))
+    const configPath = join(testState.fakeHomeDir, '.claude.json')
+    try {
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          oauthAccount: { accountUuid: 'keep-me' },
+          projects: { '/somewhere/else': { allowedTools: ['Bash'] } }
+        }),
+        'utf-8'
+      )
+      markClaudeWorkspaceTrusted(workspace)
+      const parsed = JSON.parse(readFileSync(configPath, 'utf-8'))
+      expect(parsed.oauthAccount.accountUuid).toBe('keep-me')
+      expect(parsed.projects['/somewhere/else'].allowedTools).toEqual(['Bash'])
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('is idempotent rather than rewriting a file Claude is also writing', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'orca-claude-ws-'))
+    const configPath = join(testState.fakeHomeDir, '.claude.json')
+    try {
+      markClaudeWorkspaceTrusted(workspace)
+      const first = readFileSync(configPath, 'utf-8')
+      markClaudeWorkspaceTrusted(workspace)
+      expect(readFileSync(configPath, 'utf-8')).toBe(first)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses to touch a corrupted ~/.claude.json', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'orca-claude-ws-'))
+    const configPath = join(testState.fakeHomeDir, '.claude.json')
+    try {
+      writeFileSync(configPath, '{ this is not json', 'utf-8')
+      markClaudeWorkspaceTrusted(workspace)
+      expect(readFileSync(configPath, 'utf-8')).toBe('{ this is not json')
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
     }
   })
 })
