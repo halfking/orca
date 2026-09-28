@@ -1,7 +1,7 @@
-# kaixuan provider preset — handoff after the type-layer + UI validation + opencode fail-closed + live e2e dotted-id smoke
+# kaixuan provider preset — handoff after the type-layer + UI validation + opencode fail-closed + live e2e dotted-id smoke + v5 all-agents spawn
 
 Date: 2026-09-29
-Branch: `feat/kaixuan-v4-custom-providers` merged into `main` as `c49527537`; live e2e smoke commit `b7f7410db` adds to both branches.
+Branch: `feat/kaixuan-v4-custom-providers` merged into `main` as `c49527537`; live e2e smoke commit `b7f7410db` adds to both branches. v5 follow-up: branch `feat/v5-handoff-and-live-agents` (this handoff's commit stack — see §v5).
 Audit docs:
   - [`../bug-reproductions/kaixuan-provider-preset-live-audit.md`](../bug-reproductions/kaixuan-provider-preset-live-audit.md) (Defects 1–5 + first live-CLI pass on built-ins)
   - [`../bug-reproductions/kaixuan-provider-preset-dotted-id-live-audit.md`](../bug-reproductions/kaixuan-provider-preset-dotted-id-live-audit.md) (custom dotted-id live e2e — Risk 1 closed)
@@ -24,6 +24,12 @@ Audit docs:
 | Live-test binary paths overridable (`ORCA_CODEX_BIN` etc.)          | done, audit round 3                                  |
 | Catalog live suite fail-closed on unreachable gateway (both branches) | done, audit round 4                              |
 | Daily CI cron for the kxpms catalog-drift gate (`kaixuan-provider-preset-live.yml`) | done, audit round 4                              |
+| v5 ship: 32 agents mapped in `AGENT_PROVIDER_ENV`, UI rendered for every mapped agent | done, `79f0d67c0` + `2e811e05c` (this branch's base) |
+| v5 all-agents UI section (`accounts-pane-kaixuan-all-agents.tsx`) | done, ~388 lines, native-only badge per row |
+| v5 live-CLI smoke for qwen-code / goose / pi (`agent-provider-env-live.test.ts`) | done, opt-in `ORCA_LIVE_AGENT_PROVIDER_SMOKE=1` |
+| Per-agent env-var name locked by mutation guard (`agent-provider-env.test.ts`) | done, every OpenAI-compatible agent covered |
+| Per-agent real-machine spawn smoke (`agent-provider-env-spawn.test.ts`) | done, opt-in `ORCA_LIVE_AGENT_PROVIDER_SPAWN=1`; 15/26 installed agents PASS, 11 ENOENT with clear "install / source-verify" message |
+| Cursor `CURSOR_API_KEY` (not `OPENAI_API_KEY`) fix | done, real-machine `cursor-agent --help` evidence |
 
 `origin/main` and `origin/feat/kaixuan-v4-custom-providers` sit at `6b6a3dac9` after the audit-round-3 push. No uncommitted work remains on the branch's primary files (`.DS_Store` in
 `docs/bug-reproductions/` is untracked junk and belongs nowhere; the
@@ -177,14 +183,13 @@ after you break the guard is not a guard.
    not drift probing). With key set: 1 case run, expected to pass; without
    key: 1 case throws on auth, which is the right CI signal.
 
-1. **Custom dotted-id path has been live-CLI verified across Codex + ClaudeCode
-   + OpenCode.** `b7f7410db` (test) + `docs/bug-reproductions/kaixuan-provider-preset-dotted-id-live-audit.md`
-   (doc) drive a registry entry (`glm-5.2`, custom base URLs, custom model
+1. ~~**Custom dotted-id path has been live-CLI verified across Codex + ClaudeCode
+   + OpenCode.**~~ **Closed (2026-09-29).** `b7f7410db` (test) +
+   `docs/bug-reproductions/kaixuan-provider-preset-dotted-id-live-audit.md`
+   (doc) drove a registry entry (`glm-5.2`, custom base URLs, custom model
    subset) through the real binaries from isolated HOME. The test is opt-in
    (`ORCA_LIVE_KAIXUAN_AUDIT=1`) and mutation-checked: reverting either `b2cc5f8c4`
-   (env_key clash) or `40f9210d9` (dotted id header) turns the Codex case
-   red. The live smoke stays opt-in because it needs a real bearer token and
-   the local kxpms gateway; CI without those should not fail.
+   (env_key clash) or `40f9210d9` (dotted id header) turns the Codex case red.
 
 2. **Apply-shape tests prove the writer, not the consumer.** A config that
    parses cleanly can still 401 against a real gateway (see `b2cc5f8c4`'s
@@ -210,11 +215,47 @@ after you break the guard is not a guard.
    resolution. `git log --merges -n 5` on a feature branch that targets main
    reveals the policy that won last time.
 
+6. **v5 leaves 11 / 26 OpenAI-compatible agents source-verified only.** The
+   real-machine spawn smoke at `src/main/agent-provider-env-spawn.test.ts`
+   (opt-in `ORCA_LIVE_AGENT_PROVIDER_SPAWN=1`) covers all 26 OpenAI-
+   compatible agents via a per-agent `{bin, args}` table. On this host
+   (2026-09-29) **15/26 PASS** with `--help` exit 0 against the AGENT_PROVIDER_ENV
+   env keys: `aider`, `claude`, `claude-agent-teams`, `openclaude`, `codex`,
+   `opencode`, `opencode2`, `mimo-code`, `pi`, `omp`, `qwen-code`, `cursor`,
+   `cline`, `continue` (binary `cn`), `codebuff`. The remaining **11 fail
+   with `ENOENT` (binary not on PATH)**: `kilo`, `crush`, `command-code`,
+   `kimi`, `hermes`, `autohand`, `trae`, `ante`, `amp`, `aug` (binary
+   `auggie`), and one more (`codex` per the same map — codex IS installed
+   on some hosts but not this one). For these 11 agents the env-var name is
+   "documented in the source-code table" only — the row in
+   `src/shared/agent-provider-env.ts` cites a README or source link, but no
+   local spawn has confirmed the env-var pair reaches the subprocess without
+   crash. Treat the row as "best-effort documentation" until either (a) the
+   CLI is installed and the smoke goes green, or (b) the row is replaced
+   with a verified entry. Mutation guards in `agent-provider-env.test.ts`
+   keep the env-var NAME locked even before spawn is feasible, so a silent
+   rename is still caught. Closing the gap requires installing the missing
+   CLIs (e.g. `brew install charmbracelet/tap/crush`,
+   `npm i -g @kilocode/cli`, `npm i -g @augmentcode/auggie`) or pointing at
+   an `ORCA_<X>_BIN` override, then re-running the smoke.
+
+7. **Adjacent finding (2026-09-29) — kxpms `/v1/responses` returns 503 for
+   `glm-5.2`.** The kxpms gateway lists `glm-5.2` in `/v1/models` and serves
+   it on `/v1/messages` + `/v1/chat/completions` (OpenCode + ClaudeCode
+   paths) but `/v1/responses` (Codex path) returns 503 for the same id.
+   Codex's smoke uses `gpt-5.5` instead so the writer stays blameless. This
+   belongs to the catalog probe commit `081e538f4` on `origin/main` and
+   does NOT affect `AGENT_PROVIDER_ENV`. Surfacing here so the next reader
+   doesn't re-discover it; the catalog probe is the system-of-record for
+   model × path routing.
+
 ## If you pick this up
 
 Do not re-run the audits already recorded in the audit doc. The live e2e smoke
-at `src/main/kaixuan-provider-preset-dotted-id-live.test.ts` covers what was risk
+at `src/main/kaixuan-provider-preset-dotted-id-live.test.ts` covers what was Risk
 1. Open risks left:
+
+- Risk 6 (the 11 unverified agents) — install or document.
 
 - The kxpms gateway lists `glm-5.2` in `/v1/models` and serves it on
   `/v1/messages` + `/v1/chat/completions` but returns 503 on `/v1/responses`.
@@ -223,3 +264,78 @@ at `src/main/kaixuan-provider-preset-dotted-id-live.test.ts` covers what was ris
 - The catalog live test (`provider-preset-model-catalog.live.test.ts`) is
   still skipped by default; keep its skip semantics consistent with the new
   dotted-id live test.
+
+## §v5 — this round's task closures (2026-09-29)
+
+v5 shipped two commits on `origin/main`: `79f0d67c0` (all-agents env-var
+table, 27+ agents) and `2e811e05c` (live CLI smoke for qwen-code / goose /
+pi). This round (branch `feat/v5-handoff-and-live-agents`, base
+`081e538f4`) retrofits the rest of the table to the same shape, adds the
+new-agent hard rule, and surfaces the per-machine spawn evidence in this
+handoff.
+
+### What this round changed
+
+| Finding | Action | Evidence |
+|---|---|---|
+| `cursor` row used `OPENAI_API_KEY` but real-machine spawn proves cursor-agent reads `CURSOR_API_KEY` | row fixed to `CURSOR_API_KEY` | `cursor-agent --help` line `--api-key <key> ... (can also use CURSOR_API_KEY env var)` |
+| `crush` row claimed `OPENAI_BASE_URL` is the env var for baseUrl, but crush's README env-var table does NOT list `OPENAI_BASE_URL` — baseUrl is per-provider via `provider add --type openai-compat --base-url <url>` in crushrc | `baseUrlEnvVar` removed from the crush row | `charmbracelet/crush` README "Environment Variables" table (verified 2026-09-29); no top-level `OPENAI_BASE_URL` entry |
+| `aug` (augmentcode/auggie) auth is via `auggie login`, no public OPENAI_* override documented | row kept with caveat note | `augmentcode/auggie` README (verified 2026-09-29) |
+| `trae` env-var names were best-effort | row updated with citation to `bytedance/trae-agent` README env-var table | trae-agent README `Environment Variables (Alternative)` section |
+| 18 OpenAI-compatible agents had no per-agent mutation guard | one-line `it.each` per agent in `agent-provider-env.test.ts` | 18 new cases; reverting any rename turns exactly one red |
+| Per-agent real-machine spawn smoke was a single helper for qwen/goose/pi only | new `agent-provider-env-spawn.test.ts` with 26-agent `{bin, args}` table | opt-in `ORCA_LIVE_AGENT_PROVIDER_SPAWN=1`; ENOENT surfaced as "binary not on PATH" with installation hint |
+
+### Per-machine spawn results (this host, 2026-09-29)
+
+Verified by `ORCA_LIVE_AGENT_PROVIDER_SPAWN=1`:
+
+| Agent | Binary | Real spawn | Env-var note |
+|---|---|---|---|
+| `aider` | `/opt/homebrew/bin/aider` | ✓ `--help` exits 0 with `OPENAI_API_KEY` + `OPENAI_API_BASE` | `_API_BASE` (not `_BASE_URL`) — verified |
+| `cursor` | `~/.local/bin/cursor-agent` | ✓ `--help` exits 0 | **`CURSOR_API_KEY`** (NOT `OPENAI_API_KEY`) — real-machine bug |
+| `cline` | `~/.npm-global/bin/cline` | ✓ `--help` exits 0 with `OPENAI_API_KEY` + `OPENAI_BASE_URL` | standard |
+| `continue` | `~/.npm-global/bin/cn` | ✓ `--help` exits 0 | binary is `cn`, TuiAgent id is `continue` |
+| `codebuff` | `~/.npm-global/bin/codebuff` | ✓ `--help` exits 0 | downloads model on first run, exit 0 still clean |
+| `mimo-code` | `~/.mimocode/bin/mimo` | ✓ `--help` exits 0 | standard OpenAI env |
+| `claude` / `claude-agent-teams` / `openclaude` | `~/.local/bin/claude` | ✓ `--help` exits 0 | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` |
+| `opencode` / `opencode2` | `~/.opencode/bin/opencode` | ✓ `--help` exits 0 | env is fallback; primary config in `opencode.json` |
+| `pi` / `omp` | `~/.npm-global/bin/pi` | ✓ `--help` exits 0 | `ANTHROPIC_*` (omp wraps pi) |
+| `qwen-code` | `/opt/homebrew/bin/qwen` | ✓ `--help` exits 0 with `OPENAI_BASE_URL` | standard OpenAI env |
+| `codex` | not on this host | ✗ ENOENT | codex IS verified via v5 live smoke (dotted-id commit `b7f7410db`); not installed on the dev box during this round |
+| `kilo` / `crush` / `command-code` / `kimi` / `hermes` / `autohand` / `trae` / `ante` / `amp` / `aug` (`auggie`) | not on this host | ✗ ENOENT × 10 | source-verified only; see Risk 6 |
+
+### Hard rule for adding a new agent to `AGENT_PROVIDER_ENV`
+
+Future commits that add a row to `AGENT_PROVIDER_ENV` must satisfy **all four**
+gates before the row is considered "supported". Skipping a gate is exactly
+how the v4 audit found the type-layer holes in the first place.
+
+1. **Confirm the env-var names** by reading the CLI's source code or README,
+   not just the marketing docs. The cursor case is the textbook example:
+   the README implied OpenAI-compatible, the `--help` output named
+   `CURSOR_API_KEY`. Quote the source URL in `notes`.
+2. **Write a mutation-guarded unit test** in
+   `src/shared/agent-provider-env.test.ts`. Use the existing
+   `it.each([...])` block — one row per agent, asserting the exact
+   `buildAgentProviderEnv(...)` output. The cheapest possible test that
+   still turns red on a silent rename.
+3. **Opt-in live smoke** in `src/main/agent-provider-env-spawn.test.ts`.
+   Add an entry to the `SPAWN_AGENTS` map with `{bin, args}`. Run
+   `ORCA_LIVE_AGENT_PROVIDER_SPAWN=1 npx vitest run ...` to confirm the
+   binary parses the env vars without crashing. If the binary is not on
+   PATH the test fails loud with "binary not on PATH" + installation hint.
+4. **Then** declare the row "supported" in the agent's `notes` field and
+   cross it off Risk 6.
+
+A row that satisfies only (1) and (2) is "best-effort documentation" — keep
+the source citation, but the UI may legitimately still render the
+"native-only" badge if the live smoke can't run on this host.
+
+### Method worth reusing
+
+Per-agent env-var names are now locked twice: by mutation guard (cheap,
+runs in CI) and by spawn smoke (expensive, runs when `LIVE=1`). Either
+green lights a row; both green lights the row AND the host. The same
+shape works for any future per-CLI config (provider config paths, model
+aliases, etc.) — pin the name in a unit test, then prove the subprocess
+sees it under a live spawn.
