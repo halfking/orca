@@ -16,13 +16,13 @@ string this code produced, never on whether a CLI could use it.
 
 ## Verified environment
 
-| Component | Version | How it was obtained |
-|---|---|---|
-| opencode | 1.14.33 | pre-installed at `~/.opencode/bin/opencode` |
-| claude | 2.1.90 | pre-installed at `~/.local/bin/claude` |
-| codex | 0.158.0 | installed for the audit: `npm i @openai/codex@0.158.0` into a throwaway dir; the `@openai/codex-darwin-arm64` binary was invoked directly |
-| kaixuan kxpms | — | `https://llm.kxpms.cn/v1` — 401 without a key, 200 with |
-| kaixuan local | — | `http://127.0.0.1:8782/v1` — 401 without a key, 200 with |
+| Component     | Version | How it was obtained                                                                                                                       |
+| ------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| opencode      | 1.14.33 | pre-installed at `~/.opencode/bin/opencode`                                                                                               |
+| claude        | 2.1.90  | pre-installed at `~/.local/bin/claude`                                                                                                    |
+| codex         | 0.158.0 | installed for the audit: `npm i @openai/codex@0.158.0` into a throwaway dir; the `@openai/codex-darwin-arm64` binary was invoked directly |
+| kaixuan kxpms | —       | `https://llm.kxpms.cn/v1` — 401 without a key, 200 with                                                                                   |
+| kaixuan local | —       | `http://127.0.0.1:8782/v1` — 401 without a key, 200 with                                                                                  |
 
 ## Defect 1 — Codex aborted on `env_key` even when a bearer token was present
 
@@ -46,12 +46,12 @@ it is not.
 
 **Proof (before/after, same config shape, live gateway).**
 
-| Variant | Result |
-|---|---|
+| Variant                                 | Result                                                |
+| --------------------------------------- | ----------------------------------------------------- |
 | `env_key` + `experimental_bearer_token` | `ERROR: Missing environment variable: OPENAI_API_KEY` |
-| `experimental_bearer_token` only | call completed, `ORCA_CODEX_FIXED_OK` |
-| `env_key` only, variable exported | call completed |
-| v4 code after the fix | call completed, `ORCA_V4_CODEX_OK` |
+| `experimental_bearer_token` only        | call completed, `ORCA_CODEX_FIXED_OK`                 |
+| `env_key` only, variable exported       | call completed                                        |
+| v4 code after the fix                   | call completed, `ORCA_V4_CODEX_OK`                    |
 
 ## Defect 2 — `minimax-m2.7-quickspeed` is served by neither gateway
 
@@ -79,7 +79,7 @@ that JSON is valid and every unit test passed. The map is load-bearing.
 - `requires_openai_auth = true` routes the provider through the OpenAI auth flow.
   On a host whose `auth.json` carries `auth_mode: "chatgpt"` the ChatGPT token
   has no scope for the gateway and fails `401 Missing scopes:
-  api.responses.write`. Third-party gateways need `false`.
+api.responses.write`. Third-party gateways need `false`.
 
 ## A UI claim that was factually wrong
 
@@ -90,14 +90,14 @@ gateway team exposes an Anthropic-compatible route". Both gateways answer
 
 ## Regression tests
 
-| Test | Guards |
-|---|---|
-| `never emits env_key alongside an inline token` | Defect 1; verified red against the both-fields shape |
-| `sets requires_openai_auth = false` | ChatGPT-auth hijack |
-| `embeds … as experimental_bearer_token, never as api_key` | dropped token |
-| `drops a previously embedded token when switching` | stale secret surviving a preset switch |
-| `always writes a non-empty models map` | Defect 3; verified red when the map is removed |
-| `provider-preset-model-catalog.live.test.ts` | Defect 2; live, skipped by default |
+| Test                                                      | Guards                                               |
+| --------------------------------------------------------- | ---------------------------------------------------- |
+| `never emits env_key alongside an inline token`           | Defect 1; verified red against the both-fields shape |
+| `sets requires_openai_auth = false`                       | ChatGPT-auth hijack                                  |
+| `embeds … as experimental_bearer_token, never as api_key` | dropped token                                        |
+| `drops a previously embedded token when switching`        | stale secret surviving a preset switch               |
+| `always writes a non-empty models map`                    | Defect 3; verified red when the map is removed       |
+| `provider-preset-model-catalog.live.test.ts`              | Defect 2; live, skipped by default                   |
 
 ## Reproducing the live checks
 
@@ -124,3 +124,86 @@ home directory. `vi.mock` only applies inside vitest; a plain `tsx` import gets
 the real `homedir()` and will write to the user's actual `~/.codex/config.toml`.
 Set `HOME` (Codex follows it), pass `{XDG_CONFIG_HOME}` (OpenCode), or set
 `CLAUDE_CONFIG_DIR` (ClaudeCode).
+
+---
+
+# Follow-up audit — the type layer had no guard, and its new guards were dead code
+
+Date: 2026-09-29
+Branch: `feat/kaixuan-v4-custom-providers`
+
+The section above verifies the two _built-in_ presets against real CLIs. It says
+nothing about the v4 custom-provider registry, which is the part a user can type
+into. This pass closed that gap and then audited its own work.
+
+## What the type layer was missing
+
+`ProviderPresetDefinition` is consumed by interpolating its fields into generated
+files, but the test file only asserted the two built-in endpoints. Nothing
+covered the fields that actually get written. Added 11 cases in
+`src/shared/provider-preset-types.test.ts`, each tied to a field a writer uses:
+
+| Assertion                                               | Failure it prevents                                                                                                                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `isProviderPresetIdInterpolationSafe`                   | an id that terminates or splits a TOML header, a quoted TOML value or a JSON key                                                                                               |
+| `isSafeEnvKeyName`                                      | an `env_key` / ClaudeCode env entry a shell can never export                                                                                                                   |
+| `modelProviderName === id`                              | the strip regex is built from registry `id`s while the table header is written from `modelProviderName`; a divergence leaves the previous apply's table behind on every switch |
+| `/v1` on codex + opencode urls, never on the claude one | a gateway called on the wrong path                                                                                                                                             |
+| `opencodeModelIds` non-empty, duplicate-free            | Defect 3 above — no `models` map means the provider is never registered                                                                                                        |
+| IPC result / bridge shape                               | a silently reshaped IPC contract                                                                                                                                               |
+
+Mutation-checked rather than trusted: removing the `/v1` suffix, detaching
+`modelProviderName` from `id`, and making the validator return `true` for
+anything each turned exactly one case red.
+
+## Defect 4 — the validators had no production caller
+
+**Symptom.** The first pass added both validators plus an `it.fails('KNOWN GAP')`
+case, and the suite was green. `grep` for callers outside the type module and its
+test returned nothing: a user could still type `"my gateway"` as a provider id
+and get a silently broken Codex config. The green suite was about the two
+built-ins, which are constants and were never the risk.
+
+The dialog validated only: non-empty, not a built-in id, not a duplicate. Its
+placeholder actively suggested `glm-5.2` — an id that breaks the Codex path
+(Defect 5 below).
+
+**Fix.** The dialog now calls both validators before submit, and
+`accounts-pane-kaixuan-custom-providers.validation.test.tsx` drives the real
+component to prove the rejection happens on the user path. Removing either
+validator turns exactly one case red.
+
+## Defect 5 — a dotted id corrupts the Codex table header (OPEN)
+
+`renderProviderTable` writes `[model_providers.${provider.modelProviderName}]`
+unquoted. TOML reads a dot in a bare key as a path separator, verified with
+`tomllib`:
+
+```python
+tomllib.loads('[model_providers.glm-5.2]\nbase_url = "https://x/v1"')
+# -> {"model_providers": {"glm-5": {"2": {"base_url": "https://x/v1"}}}}
+```
+
+`model_providers["glm-5.2"]` does not exist, so the provider the config just
+declared cannot be resolved. OpenCode and the registry handle dots fine, which
+is why the validator allows them — restricting ids would cost OpenCode users a
+legitimate key to fix a Codex-only problem.
+
+**Fixed in `40f9210d9`.** The header is now written quoted
+(`[model_providers."glm-5.2"]`, which TOML 1.0 reads as one flat key) and the
+strip regex accepts the quoted, single-quoted and bare spellings, so configs
+written by earlier versions and by hand are still cleaned up on a switch.
+Verified against codex-cli 0.158.0: the bare form refuses to load the config
+with `model_providers.glm-5: provider name must not be empty`, the quoted form
+loads. The type-layer case moved from `it.fails` to a plain assertion, so
+`glm-5.2` is now a supported id rather than a caveat.
+
+This branch therefore keeps accepting dotted ids on the UI side, and the id
+placeholder is back to the documented `glm-5.2`.
+
+## What this round did not prove
+
+The custom-provider path — a dotted id applied to all three agents from the
+registry rather than a built-in — has still not been driven end to end through
+the real CLIs. The header shape is verified; the surrounding apply path for a
+registry entry is unit-tested only.

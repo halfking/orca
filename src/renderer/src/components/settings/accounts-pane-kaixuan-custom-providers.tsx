@@ -9,10 +9,13 @@ import { Label } from '../ui/label'
 import { Badge } from '../ui/badge'
 import { Input } from '../ui/input'
 import { SearchableSetting } from './SearchableSetting'
+import type { ProviderPresetDefinition } from '../../../../shared/provider-preset-types'
 import {
-  BUILT_IN_PROVIDER_IDS,
-  type ProviderPresetDefinition
-} from '../../../../shared/provider-preset-types'
+  parseOpenCodeModelIds,
+  resolveEnvKeyName,
+  validateProviderDraft
+} from './accounts-pane-kaixuan-provider-draft'
+import { FieldRow } from './accounts-pane-kaixuan-field-row'
 
 export function CustomProvidersSection({
   customProviders,
@@ -175,34 +178,16 @@ export function ProviderEditorDialog({
   const handleSubmit = useCallback(async () => {
     const trimmedId = id.trim()
     const trimmedLabel = label.trim()
-    if (trimmedId.length === 0) {
-      setSubmitError('id is required')
+    const draftError = validateProviderDraft(
+      { id, label, codexBaseUrl, envKeyName, opencodeModelIdsText },
+      existingIds,
+      isEdit
+    )
+    if (draftError) {
+      setSubmitError(draftError)
       return
     }
-    if (BUILT_IN_PROVIDER_IDS.has(trimmedId)) {
-      setSubmitError(`"${trimmedId}" is a built-in id; pick a different one`)
-      return
-    }
-    if (!isEdit && existingIds.has(trimmedId)) {
-      setSubmitError(`A provider with id "${trimmedId}" already exists`)
-      return
-    }
-    if (trimmedLabel.length === 0) {
-      setSubmitError('label is required')
-      return
-    }
-    const opencodeModelIds = opencodeModelIdsText
-      .split(/[\s,]+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    if (opencodeModelIds.length === 0) {
-      setSubmitError('at least one OpenCode model id is required')
-      return
-    }
-    if (!/^https?:\/\//.test(codexBaseUrl.trim())) {
-      setSubmitError('Codex base URL must start with http:// or https://')
-      return
-    }
+    const opencodeModelIds = parseOpenCodeModelIds(opencodeModelIdsText)
     setSubmitting(true)
     try {
       await onSubmit({
@@ -213,7 +198,7 @@ export function ProviderEditorDialog({
         codexBaseUrl: codexBaseUrl.trim(),
         claudeBaseUrl: claudeBaseUrl.trim() || codexBaseUrl.trim(),
         opencodeBaseUrl: opencodeBaseUrl.trim() || codexBaseUrl.trim(),
-        envKeyName: envKeyName.trim() || 'OPENAI_API_KEY',
+        envKeyName: resolveEnvKeyName(envKeyName),
         opencodeModelIds
       })
     } catch (error) {
@@ -397,22 +382,6 @@ export function ProviderEditorDialog({
         )}
       </p>
       {submitError ? <p className="mt-2 text-xs text-destructive">{submitError}</p> : null}
-    </div>
-  )
-}
-function FieldRow({
-  label,
-  children
-}: {
-  label: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  // Why: Label owns its typography (per shadcn/no-restyle); we render the field
-  // label as a sibling span so the form stays compact without restyling Label.
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-foreground/80">{label}</span>
-      {children}
     </div>
   )
 }
