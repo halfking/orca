@@ -19,6 +19,7 @@ import {
   getAccountsCodexSearchEntries,
   getAccountsGeminiSearchEntries,
   getAccountsGrokSearchEntries,
+  getAccountsKaixuanSearchEntries,
   getAccountsLocationSearchEntries,
   getAccountsMiniMaxSearchEntries,
   getAccountsOpencodeSearchEntries,
@@ -58,6 +59,7 @@ import {
   renderOpenCodeAccountsSection
 } from './accounts-pane-provider-setting-sections'
 import { renderMiniMaxAccountsSection } from './accounts-pane-minimax-section'
+import { renderKaixuanAccountsSection } from './accounts-pane-kaixuan-section'
 import { renderAccountsRemovalDialogs } from './accounts-pane-removal-dialogs'
 
 export { getAccountsPaneSearchEntries }
@@ -376,6 +378,9 @@ export function AccountsPane({
       : null,
     matchesSettingsSearch(searchQuery, getAccountsMiniMaxSearchEntries())
       ? renderMiniMaxAccountsSection(model)
+      : null,
+    matchesSettingsSearch(searchQuery, getAccountsKaixuanSearchEntries())
+      ? renderKaixuanAccountsSection()
       : null,
     matchesSettingsSearch(searchQuery, getAccountsGrokSearchEntries()) ? (
       <GrokAccountsSection key="grok" />

@@ -3093,7 +3093,7 @@
             "missing": {
               "tui": {
                 "title": "This ZCode build has no terminal UI",
-                "description": "Orca's hooks installed correctly \u2014 the zcode on your PATH just cannot open a session. The ZCode desktop app bundles the agent runtime without its terminal UI. Install a zcode that ships the TUI, then run zcode outside Orca to confirm."
+                "description": "Orca's hooks installed correctly — the zcode on your PATH just cannot open a session. The ZCode desktop app bundles the agent runtime without its terminal UI. Install a zcode that ships the TUI, then run zcode outside Orca to confirm."
               }
             }
           },
@@ -6509,7 +6509,27 @@
               "placeholder": "/connect または OPENCODE_API_KEY で保存されたキーを使う場合は空欄のままにします",
               "help": "ステータスバーの OpenCode Go 使用状況表示に使います。下のセッション Cookie はレガシーコンソール (OpenCode Black) アカウントでのみ必要です。"
             }
-          }
+          },
+          "kaixuanTitle": "Kaixuan provider preset",
+          "kaixuanDescription": "Switch the active model provider for Codex, ClaudeCode, and OpenCode to one of the two Kaixuan gateways. Endpoints live in ~/.codex/config.toml, ~/.claude/settings.json, and ~/.config/opencode/opencode.json respectively; nothing leaves this device. Apply restarts the next CLI session — already-running workers keep using their existing config until they exit.",
+          "kaixuanApiUnavailable": "The provider-preset bridge is not exposed in this build. Reinstall Orca after the next release ships.",
+          "kaixuanAgentCodex": "Codex",
+          "kaixuanAgentClaude": "ClaudeCode",
+          "kaixuanAgentOpencode": "OpenCode",
+          "kaixuanAgentTitle": "Provider for {{agent}}",
+          "kaixuanAgentDescription": "Pick a Kaixuan gateway or clear the active preset. Currently active: {{presetLabel}}. Config file: {{configPath}}.",
+          "kaixuanNoPreset": "system default",
+          "kaixuanConfigNotLoaded": "not loaded",
+          "kaixuanActiveBadge": "active",
+          "kaixuanClearButton": "Clear (revert to system default)",
+          "kaixuanButtonActive": "Active: {{label}}",
+          "kaixuanCaveat": "Read before enabling. The kxpms gateway ships an OpenAI Responses endpoint; ClaudeCode walks the Anthropic /v1/messages protocol. Apply will write the right base URL into ~/.claude/settings.json, but ClaudeCode worker calls may 404/501 against the upstream until the gateway team exposes an Anthropic-compatible route. Codex and OpenCode both speak OpenAI Responses and work as soon as OPENAI_API_KEY is set in the shell that runs the agent.",
+          "kaixuanApiKeyTitle": "Inline API key (ClaudeCode / OpenCode)",
+          "kaixuanApiKeyDescription": "Optional. When set, the literal token is written as ANTHROPIC_AUTH_TOKEN into ~/.claude/settings.json and as options.apiKey into ~/.config/opencode/opencode.json. Codex is unaffected — it reads OPENAI_API_KEY from the shell at agent startup. Leave blank if you exported the token in the shell that runs the worker and want ClaudeCode to inherit it.",
+          "kaixuanApiKeyLabel": "Inline API key",
+          "kaixuanApiKeyClear": "Clear",
+          "kaixuanAgentClaudeCaveat": "Writes ANTHROPIC_BASE_URL into ~/.claude/settings.json. Provide the inline API key above to also embed ANTHROPIC_AUTH_TOKEN — otherwise ClaudeCode must inherit it from the shell that runs it.",
+          "kaixuanAgentOpencodeCaveat": "Writes provider.kaixuan-<id> with options.baseURL + options.apiKey. OpenCode uses {env:OPENAI_API_KEY} when the inline key is blank — make sure the shell running opencode has it exported."
         },
         "AdvancedPane": {
           "40b29e0bf3": "再起動",
@@ -8900,7 +8920,18 @@
             "b2c4e7f1a8": "終点",
             "3a9b6d2c4e": "APIキー",
             "5d8f1a3b7c": "中国",
-            "7e2a4b8c1d": "海外"
+            "7e2a4b8c1d": "海外",
+            "kaixuanTitle": "Kaixuan provider preset",
+            "kaixuanDescription": "Switch Codex / ClaudeCode / OpenCode to a Kaixuan gateway (local http://127.0.0.1:8782 or remote https://llm.kxpms.cn). One-click apply writes the matching provider block into each agent’s system config.",
+            "kaixuanKeyword": "kaixuan",
+            "kaixuanKxpmsKeyword": "kxpms",
+            "kaixuanLocalKeyword": "kaixuan local",
+            "kaixuanRemoteKeyword": "kaixuan kxpms",
+            "kaixuanGatewayKeyword": "gateway",
+            "kaixuanLlmKeyword": "llm.kxpms.cn",
+            "kaixuanLoopbackKeyword": "127.0.0.1:8782",
+            "kaixuanProviderKeyword": "provider preset",
+            "kaixuanOpenaiKeyword": "openai compatible"
           }
         },
         "advanced": {

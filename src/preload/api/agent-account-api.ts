@@ -4,6 +4,11 @@ import type {
 } from '../../shared/managed-account-types'
 import type { CodexConfigSyncStatus } from '../../shared/codex-config-sync-types'
 import type { GrokAccountStatus } from '../../shared/rate-limit-types'
+import type {
+  KaixuanPresetId,
+  ProviderPresetAgentId,
+  ProviderPresetApplyResult
+} from '../../shared/provider-preset-types'
 
 export type CodexAccountsApi = {
   list: () => Promise<CodexRateLimitAccountsState>
@@ -79,4 +84,24 @@ export type MinimaxCredentialsApi = {
 
 export type CodexConfigSyncApi = {
   status: () => Promise<CodexConfigSyncStatus>
+}
+
+export type ProviderPresetsApi = {
+  applyCodex: (args: {
+    presetId: KaixuanPresetId | null
+    apiKey?: string | null
+  }) => Promise<ProviderPresetApplyResult>
+  applyClaude: (args: {
+    presetId: KaixuanPresetId | null
+    apiKey?: string | null
+    configDirName?: string
+  }) => Promise<ProviderPresetApplyResult>
+  applyOpenCode: (args: {
+    presetId: KaixuanPresetId | null
+    apiKey?: string | null
+  }) => Promise<ProviderPresetApplyResult>
+  getCurrent: (args: { agentId: ProviderPresetAgentId }) => Promise<{
+    presetId: KaixuanPresetId | null
+    configPath: string
+  }>
 }
