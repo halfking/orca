@@ -242,4 +242,25 @@ describe('rendering the scheduling path', () => {
   it('gives a runnable argv for whatever is actionable right now', () => {
     expect(rendered).toContain('orca orchestration worker-start --task audit_b')
   })
+
+  it('never truncates a verdict, because a cut pass_with_findings reads as pass', () => {
+    const withFindings = buildView([
+      entry({
+        task: 'impl_c',
+        event: 'worker-done',
+        state: 'completed',
+        role: 'implementer',
+        verdict: 'pass_with_findings',
+        filesModified: ['src/c.ts']
+      })
+    ])
+    const text = renderView(
+      withFindings.folded,
+      withFindings.blocking,
+      withFindings.matrix,
+      withFindings.order
+    )
+    expect(text).toContain('pass_with_findings')
+    expect(text).not.toContain('pass_with_ ')
+  })
 })

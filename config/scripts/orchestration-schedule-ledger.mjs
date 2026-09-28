@@ -297,6 +297,12 @@ function pad(value, width) {
   return text.length >= width ? text.slice(0, width) : text.padEnd(width)
 }
 
+/** Verdict and outcome are never truncated: `pass_with_findings` cut to `pass_with_` reads as pass. */
+function padVerdict(value) {
+  const text = value == null || value === '' ? '-' : String(value)
+  return text.padEnd(20)
+}
+
 export function renderView(folded, blocking, matrix, order) {
   const lines = []
   lines.push(`RUN ${folded.run ?? '(unknown)'}  tasks=${folded.tasks.length}`)
@@ -316,7 +322,7 @@ export function renderView(folded, blocking, matrix, order) {
       lines.push(
         `    ${pad(task.id, 14)} ${pad(task.role, 13)} ${pad(task.agent, 9)} ` +
           `${pad(task.model, 22)} ${pad(task.effort, 7)} ${pad(task.state, 11)} ` +
-          `${pad(task.verdict ?? task.outcome, 10)} ${pad(placement, 28)} files=${task.files.size}`
+          `${padVerdict(task.verdict ?? task.outcome)} ${pad(placement, 28)} files=${task.files.size}`
       )
     }
   }
@@ -380,7 +386,7 @@ export function renderView(folded, blocking, matrix, order) {
   for (const [index, id] of order.entries()) {
     const task = folded.tasks.find((t) => t.id === id)
     lines.push(
-      `  ${index + 1}. ${pad(id, 14)} verdict=${pad(task?.verdict ?? task?.outcome ?? null, 10)} ` +
+      `  ${index + 1}. ${pad(id, 14)} verdict=${padVerdict(task?.verdict ?? task?.outcome ?? null)} ` +
         `files=${pad(task?.files.size ?? 0, 4)} report=${task?.reportPaths.at(-1) ?? '-'}`
     )
   }
