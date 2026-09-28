@@ -39,6 +39,7 @@ import {
 } from './accounts-pane-kaixuan-custom-providers'
 import { AgentPresetCard, type AgentCardState } from './accounts-pane-kaixuan-agent-card'
 import { AccountsPaneKaixuanHeader } from './accounts-pane-kaixuan-header'
+import { AccountsPaneKaixuanAllAgentsSection } from './accounts-pane-kaixuan-all-agents'
 
 const initialAgentState: AgentCardState = {
   providerId: null,
@@ -78,6 +79,12 @@ function KaixuanAccountsSection(): React.JSX.Element {
   const [editingProvider, setEditingProvider] = useState<ProviderPresetDefinition | null>(null)
   const [isAddingNew, setIsAddingNew] = useState<boolean>(false)
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null)
+  // Why: the all-agents section needs ONE provider to apply. Default to
+  // kaixuan-local so the "Apply to all supported agents" button has a
+  // reasonable default on first visit; the user picks another from the
+  // dropdown if needed.
+  const [allAgentsSelectedProviderId, setAllAgentsSelectedProviderId] =
+    useState<string>('kaixuan-local')
 
   const knownProviders = useMemo<readonly ProviderPresetDefinition[]>(
     () => [...Object.values(KAIXUAN_PRESETS), ...customProviders],
@@ -354,6 +361,12 @@ function KaixuanAccountsSection(): React.JSX.Element {
         onAddNew={handleAddNew}
         onEdit={handleEdit}
         onDelete={handleDelete}
+      />
+
+      <AccountsPaneKaixuanAllAgentsSection
+        customProviders={customProviders}
+        selectedProviderId={allAgentsSelectedProviderId}
+        onProviderChange={setAllAgentsSelectedProviderId}
       />
 
       {isAddingNew ? (

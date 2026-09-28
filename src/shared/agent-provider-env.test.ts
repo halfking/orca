@@ -100,6 +100,7 @@ describe('agent-provider-env (v4 → all-agents extension)', () => {
       'ante'
     ]
     for (const agent of mustHaveBaseUrl) {
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: EXPECTED_AGENTS is a readonly tuple of TuiAgent keys; TS narrows the iterated type to the wider string union in this for-of, so the cast re-narrows to the literal-keyed lookup type.
       const entry = AGENT_PROVIDER_ENV[agent as keyof typeof AGENT_PROVIDER_ENV]
       expect(entry, `agent=${agent} should be mapped`).toBeDefined()
       expect(typeof entry!.baseUrlEnvVar, `agent=${agent} should expose a baseUrl env var`).toBe(
@@ -120,9 +121,11 @@ describe('agent-provider-env (v4 → all-agents extension)', () => {
 
   it('isAgentProviderEnvMapped reflects the table', () => {
     for (const agent of EXPECTED_AGENTS) {
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: agent is the tuple-element type from EXPECTED_AGENTS / NATIVE_ONLY_AGENTS, both `readonly (keyof typeof AGENT_PROVIDER_ENV)[]`. The `as never` is the literal-key-narrowed cast the consumer expects.
       expect(isAgentProviderEnvMapped(agent as never)).toBe(true)
     }
     for (const agent of NATIVE_ONLY_AGENTS) {
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: see comment above.
       expect(isAgentProviderEnvMapped(agent as never)).toBe(true)
     }
   })
@@ -143,11 +146,13 @@ describe('agent-provider-env (v4 → all-agents extension)', () => {
     if (unmapped === null) {
       unmapped = '__definitely_not_a_real_agent__'
     }
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: unmapped is a synthesised string that's guaranteed not to be a TuiAgent; the cast widens for the call signature.
     expect(buildAgentProviderEnv(unmapped as never, 'https://x/v1', 'sk-test')).toBeNull()
   })
 
   it('buildAgentProviderEnv returns null for nativeOnly agents', () => {
     for (const agent of NATIVE_ONLY_AGENTS) {
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: agent is the tuple-element type from NATIVE_ONLY_AGENTS, a readonly (keyof typeof AGENT_PROVIDER_ENV)[]. The cast widens for the call.
       expect(buildAgentProviderEnv(agent as never, 'https://x/v1', 'sk-test')).toBeNull()
     }
   })
