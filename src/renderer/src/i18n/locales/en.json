@@ -6700,7 +6700,7 @@
           "kaixuanButtonActive": "Active: {{label}}",
           "kaixuanCaveat": "Read before enabling. Both Kaixuan gateways (local 127.0.0.1:8782 and remote https://llm.kxpms.cn) serve the Anthropic /v1/messages route and the OpenAI /v1/responses route, verified live against both on 2026-09-29. Apply writes the matching base URL into ~/.claude/settings.json, ~/.codex/config.toml and ~/.config/opencode/opencode.json. If you leave the inline API key blank, Orca writes an environment variable reference instead, so the shell that launches the agent must have OPENAI_API_KEY exported.",
           "kaixuanApiKeyTitle": "Inline API key (ClaudeCode / OpenCode)",
-          "kaixuanApiKeyDescription": "Optional. When set, the literal token is written as ANTHROPIC_AUTH_TOKEN into ~/.claude/settings.json and as options.apiKey into ~/.config/opencode/opencode.json. Codex is unaffected — it reads OPENAI_API_KEY from the shell at agent startup. Leave blank if you exported the token in the shell that runs the worker and want ClaudeCode to inherit it.",
+          "kaixuanApiKeyDescription": "literal token is written in plain text; restrict file permissions or export the shell env var instead",
           "kaixuanApiKeyLabel": "Inline API key",
           "kaixuanApiKeyClear": "Clear",
           "kaixuanSettingsLoadError": "Failed to load or save the custom-provider registry: {{error}}. Other settings may still apply; the registry is read-only this session.",

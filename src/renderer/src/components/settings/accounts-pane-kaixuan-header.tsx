@@ -86,7 +86,7 @@ export function AccountsPaneKaixuanHeader({
         )}
         description={translate(
           'auto.components.settings.AccountsPane.kaixuanApiKeyDescription',
-          'Optional. When set, the literal token is written as ANTHROPIC_AUTH_TOKEN into ~/.claude/settings.json and as options.apiKey into ~/.config/opencode/opencode.json. Codex is unaffected — it reads OPENAI_API_KEY from the shell at agent startup. Leave blank if you exported the token in the shell that runs the worker and want ClaudeCode to inherit it.'
+          'literal token is written in plain text; restrict file permissions or export the shell env var instead'
         )}
         keywords={['kaixuan', 'api', 'key', 'token', 'bearer', 'anthropic', 'openai']}
         className="space-y-2"
