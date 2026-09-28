@@ -223,3 +223,61 @@ at `src/main/kaixuan-provider-preset-dotted-id-live.test.ts` covers what was ris
 - The catalog live test (`provider-preset-model-catalog.live.test.ts`) is
   still skipped by default; keep its skip semantics consistent with the new
   dotted-id live test.
+
+## §6 — this round's task closures (aac9ceae9 follow-ups)
+
+Three independent follow-up items were closed on `feat/kaixuan-v4-i18n-renderer-handoff`,
+branched off `origin/main` (`90e791f16`).
+
+### T1 — mutation check on the opencode fail-closed guards
+
+`src/main/opencode/opencode-apply-provider-preset.test.ts` carries **19 tests**
+in total (the 17 pre-existing guards + the 2 new v4+apiKey regressions from
+`aac9ceae9`). Mutation evidence: **17/19 → 1 red → 17 green**. With the
+malformed-JSON guard from `50564adda` reverted (worktree-isolated against
+`b7f7410db`), the test `refuses to overwrite a malformed opencode.json instead
+of wiping it` turns red; the other 17 pre-existing tests stay green. The new
+v4+apiKey tests stay green too — they pin the literal-token contract and the
+`{env:OPENAI_API_KEY}` placeholder, not the malformed-JSON guard, so they are
+not sensitive to this mutation. Net read: the fail-closed guard is observable
+in the test suite; the two v4 regressions lock separate invariants and will
+fail on their own regressions.
+
+### T2.a — cancelled: no `.jsonc` handling
+
+The candidate task was to add a `~/.config/opencode/opencode.jsonc` code path
+(Codex + ClaudeCode accept either extension). Cancel basis: the user's
+actual `~/.config/opencode/opencode.json` is real JSON, and opencode 1.x
+reads `opencode.json` whether or not `opencode.jsonc` exists. Adding a
+`.jsonc` reader would double the parser surface for zero observed value.
+The literal-token + fail-closed guards already in place cover the JSON
+shape that actually lands on disk. Re-open this item only if a user reports
+their config arriving in `.jsonc` form.
+
+### T2.b — implementation scope (committed as `aac9ceae9`)
+
+- **`src/main/opencode/opencode-apply-provider-preset.ts`** — corrected the
+  JSDoc on `applyOpenCodeProvider`. The previous comment claimed the literal
+  path is "equivalent to `opencode auth set <id> <token>`", which is wrong:
+  `auth set` writes `$XDG_DATA_HOME/opencode/auth.json` while this function
+  writes `options.apiKey` inside `$XDG_CONFIG_HOME/opencode/opencode.json`.
+  opencode 1.x accepts both at runtime, so behaviour was correct; the
+  comment now names the actual file and key path.
+- **`src/main/opencode/opencode-apply-provider-preset.test.ts`** — added 2
+  tests that pin the v4 path through `applyOpenCodeProvider`:
+  (a) `writes the literal apiKey verbatim when v4 applyOpenCodeProvider
+  receives one` — the token lands in `provider['glm-5.2'].options.apiKey`
+  and `npm` is `@ai-sdk/openai-compatible`; (b) `keeps the
+  {env:OPENAI_API_KEY} placeholder when v4 applyOpenCodeProvider gets no
+  apiKey` — the literal path must not default a token silently.
+- **`docs/bug-reproductions/.gitignore`** — re-ignores `.DS_Store` and other
+  OS junk under `docs/bug-reproductions/`. The root `.gitignore` whitelists
+  the subtree with `!docs/bug-reproductions/**`, which also un-ignores
+  Finder bookkeeping files; this new `.gitignore` keeps them out of the
+  commit graph.
+
+**No i18n changes in this round.** `kaixuanApiKeyDescription` value stays in
+its current English text; the renderer description in
+`src/renderer/src/components/settings/accounts-pane-kaixuan-header.tsx` was
+*not* touched. Translation work, if any, is a separate P1 on a later round
+and was explicitly out of scope for `aac9ceae9`.
