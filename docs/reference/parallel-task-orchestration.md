@@ -302,6 +302,33 @@ node config/scripts/orchestration-wave-plan.mjs emit --plan plan.json --allow-wa
 - 生成的 shell 用 heredoc 承载多行 spec、用 shell 变量承载真实 Task id（`--deps "[\"${TASK_A}\"]"`），每个 Dispatch/Gate 都自动写一条账本。
 - 覆盖测试见 `orchestration-role-matrix.test.mjs`（12 例）与 `orchestration-wave-plan.test.mjs`（21 例）。
 
+#### 4.7.3 已实现：`config/scripts/orchestration-merge-gate.mjs`
+
+把 4.5 的 verdict 契约和 4.6 的合并协议变成 fail-closed 的两道闸：
+
+```text
+node config/scripts/orchestration-merge-gate.mjs verify --ledger <path>          # 退出码 0=可合
+node config/scripts/orchestration-merge-gate.mjs merge  --ledger <path> --repo <path> --base <ref> [--execute] [--rebase]
+```
+
+**verdict 契约**（任何一条不满足就关门）：
+
+- `verdict` 必须是 `pass | pass_with_findings | fail`；
+- `pass` 却带 findings、`pass_with_findings` 却没 findings、`fail` 却没有任何 blocker 级 finding——**声明与证据自相矛盾即拒绝**；
+- 每条 finding 必须有 `file:line` 和可复现 evidence；
+- **任何 verdict 都必须有 `reportPath`**：没人能重读的审计不是审计，是一句声明；
+- 覆盖关系读 DAG 而非命名：`audit_a` 审计 `impl_a`，因为它的 `deps` 指向 `impl_a`；
+- 未审计的落地任务、未完成的任务、未决的 gate、被判 fail 的 gate——全部阻断。
+
+**合并执行**：
+
+- 合并顺序来自账本的写集分析（少冲突先合），不是任务名顺序；
+- **默认不 rebase**。rebase 会改写常常已经推送过的特性分支，所以它是 `--rebase` 显式选项；默认路径只报告每个分支落后基线多少个 commit，并提示接受改写时的命令；
+- **冲突绝不自动解决**：abort 后把仓库切回基线分支、停在"什么都没发生"的状态，报告冲突分支，归属权交回给人；
+- **空计划不得报成功**：账本里没有可落地分支时报 `nothing to merge` 并以非零码退出——"全部合并完成"不能是一句关于零件事的断言。
+
+覆盖测试见 `orchestration-merge-gate.test.mjs`（22 例），其中 8 例在**真实临时 git 仓库**上跑：落后计数、脏工作区拒绝、独立分支合入、冲突中止且不选边、默认不改写分支历史、已合并不重复合、空计划不报成功。
+
 ---
 
 ## 5. 执行阶段
@@ -311,7 +338,7 @@ node config/scripts/orchestration-wave-plan.mjs emit --plan plan.json --allow-wa
 | P0 | 本文档 + `.gitignore` 放行 + AGENTS.md 挂链 | 文档可被 git 跟踪，AGENTS.md 可跳转 | ✅ 完成 |
 | P1 | **L3 可见性**：调度账本记录器 + 单命令调度视图 | 合成 Run 数据产出完整视图：树、DAG 阻塞、argv、写集重叠矩阵 | ✅ 完成（17/17 测试 + CLI 端到端 + lint/format） |
 | P2 | **L0/L1 规程落地**：角色矩阵 + Task spec 模板 + 五波命令骨架编译 | 一个计划编译出完整 `orca` 命令序列，且非法计划在派发前就被拒 | ✅ 完成（33 例测试 + 脚本生成 + `bash -n` 校验） |
-| P3 | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | 对真实分支执行一次完整合并，冲突被显式报告而非静默处理 | 待定 |
+| P3 | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | verdict 契约 fail-closed；真实 git 仓库上完成合入，冲突被显式报告而非静默处理 | ✅ 完成（22 例，其中 8 例跑真实 git 仓库） |
 | P4 | **真实 pilot**：在本仓库用两个真实任务跑完整链路 | 两个任务零互相干扰、各自出 verdict、按建议顺序合并、账本可复盘 | 待定（需授权） |
 
 **风险与边界**
