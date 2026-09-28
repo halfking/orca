@@ -1,45 +1,77 @@
-// What: IPC handler，把 renderer 端的 "Apply kaixuan preset" 调用路由到对应 agent 的 apply 函数。
-// 三组 apiChannel：providerPresets:applyCodex / applyClaude / applyOpenCode / getCurrent。
+// What: IPC handler，把 renderer 端的 "Apply provider preset" 调用路由到对应 agent 的
+// apply 函数。四组 apiChannel：providerPresets:applyCodex / applyClaude /
+// applyOpenCode / getCurrent。
 //
-// Why: 见 src/shared/provider-preset-types.ts 头部注释。
-// preload 在 src/preload/api/provider-preset-api.ts 暴露给 renderer 为 window.api.providerPresets.*。
+// Why: 见 src/shared/provider-preset-types.ts 头部注释。preload 在
+// src/preload/api/provider-preset-api.ts 暴露给 renderer 为 window.api.providerPresets.*。
+//
+// v4 wiring: apply handlers take a full `provider: ProviderPresetDefinition | null`
+// (the renderer resolves built-in + custom ids to definitions), and getCurrent
+// takes `knownProviders` so the read path can match against the same registry
+// the user sees in the UI. The knownProviders list is renderer-owned; the main
+// process treats it as untrusted input (size-capped) and never re-emits ids
+// that are not in it.
 import { ipcMain } from 'electron'
+import type {
+  ProviderPresetAgentId,
+  ProviderPresetApplyResult,
+  ProviderPresetDefinition
+} from '../../shared/provider-preset-types'
+import { applyCodexProvider, readActiveCodexProvider } from '../codex/codex-apply-provider-preset'
 import {
-  applyCodexKaixuanPreset,
-  readActiveCodexKaixuanPreset
-} from '../codex/codex-apply-provider-preset'
-import {
-  applyClaudeKaixuanPreset,
-  readActiveClaudeKaixuanPresetFromDisk
+  applyClaudeProvider,
+  readActiveClaudeProviderFromDisk
 } from '../claude/claude-apply-provider-preset'
 import {
-  applyOpenCodeKaixuanPreset,
-  readActiveOpenCodeKaixuanPresetFromDisk
+  applyOpenCodeProvider,
+  readActiveOpenCodeProviderFromDisk
 } from '../opencode/opencode-apply-provider-preset'
-import type {
-  KaixuanPresetId,
-  ProviderPresetAgentId,
-  ProviderPresetApplyResult
-} from '../../shared/provider-preset-types'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getSystemCodexHomePath } from '../codex/codex-home-paths'
+import { BUILT_IN_PROVIDER_IDS } from '../../shared/provider-preset-types'
 
-function isKnownPresetId(value: string): value is KaixuanPresetId {
-  return value === 'kaixuan-local' || value === 'kaixuan-kxpms'
+// Why: defense in depth — renderer is treated as untrusted; cap the registry
+// size so a malicious or buggy renderer can't make us parse megabytes of
+// provider definitions per IPC call. 100 is enough for any realistic org
+// catalogue of OpenAI-compatible providers.
+const MAX_KNOWN_PROVIDERS = 100
+
+function asKnownProviders(value: unknown): readonly ProviderPresetDefinition[] {
+  if (!Array.isArray(value)) {
+    throw new Error('knownProviders must be an array')
+  }
+  if (value.length > MAX_KNOWN_PROVIDERS) {
+    throw new Error(`knownProviders has ${value.length} entries; max is ${MAX_KNOWN_PROVIDERS}`)
+  }
+  const result: ProviderPresetDefinition[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new Error('knownProviders entries must be objects')
+    }
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: entry is `object` per the guard above; the cast widens unknown → ProviderPresetDefinition for downstream field access. Renderer is untrusted, and we re-validate required fields below.
+    const provider = entry as ProviderPresetDefinition
+    if (typeof provider.id !== 'string' || provider.id.length === 0) {
+      throw new Error('knownProviders entry missing id')
+    }
+    result.push(provider)
+  }
+  return result
 }
 
-function asPresetId(value: unknown): KaixuanPresetId | null {
+function asProviderOrNull(value: unknown): ProviderPresetDefinition | null {
   if (value === null || value === undefined) {
     return null
   }
-  if (typeof value !== 'string') {
-    throw new Error(`presetId must be a string or null, got ${typeof value}`)
+  if (typeof value !== 'object') {
+    throw new Error('provider must be an object or null')
   }
-  if (isKnownPresetId(value)) {
-    return value
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: value is `object` per the guard above; the cast widens unknown → ProviderPresetDefinition for downstream field access. Renderer is untrusted, and we re-validate `id` below.
+  const provider = value as ProviderPresetDefinition
+  if (typeof provider.id !== 'string' || provider.id.length === 0) {
+    throw new Error('provider missing id')
   }
-  throw new Error(`unknown presetId: ${value}`)
+  return provider
 }
 
 function asStringOrNull(value: unknown): string | null | undefined {
@@ -55,16 +87,6 @@ function asStringOrNull(value: unknown): string | null | undefined {
   return value
 }
 
-function asStringOrUndefined(value: unknown): string | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-  if (typeof value !== 'string') {
-    return undefined
-  }
-  return value
-}
-
 function asAgentId(value: unknown): ProviderPresetAgentId {
   if (value === 'codex' || value === 'claude' || value === 'opencode') {
     return value
@@ -72,13 +94,33 @@ function asAgentId(value: unknown): ProviderPresetAgentId {
   throw new Error(`unknown agentId: ${String(value)}`)
 }
 
+/** Build the set of provider ids the apply / read functions should treat as
+ *  Orca-owned when stripping the user's system config. Always includes the
+ *  built-ins; the renderer-supplied knownProviders contribute their custom ids. */
+function buildKnownIds(rendererKnown: readonly ProviderPresetDefinition[]): ReadonlySet<string> {
+  const ids = new Set<string>(BUILT_IN_PROVIDER_IDS)
+  for (const provider of rendererKnown) {
+    ids.add(provider.id)
+  }
+  return ids
+}
+
 export function registerProviderPresetHandlers(): void {
   ipcMain.handle(
     'providerPresets:applyCodex',
-    (_event, args: { presetId?: unknown; apiKey?: unknown }): ProviderPresetApplyResult => {
-      const presetId = asPresetId(args?.presetId)
+    (
+      _event,
+      args: {
+        provider?: unknown
+        apiKey?: unknown
+        knownProviders?: unknown
+      }
+    ): ProviderPresetApplyResult => {
+      const provider = asProviderOrNull(args?.provider)
       const apiKey = asStringOrNull(args?.apiKey)
-      const result = applyCodexKaixuanPreset(presetId, apiKey === undefined ? {} : { apiKey })
+      const knownProviders = asKnownProviders(args?.knownProviders ?? [])
+      const knownIds = buildKnownIds(knownProviders)
+      const result = applyCodexProvider(provider, knownIds, apiKey === undefined ? {} : { apiKey })
       return result
     }
   )
@@ -87,27 +129,46 @@ export function registerProviderPresetHandlers(): void {
     'providerPresets:applyClaude',
     (
       _event,
-      args: { presetId?: unknown; apiKey?: unknown; configDirName?: unknown }
+      args: {
+        provider?: unknown
+        apiKey?: unknown
+        configDirName?: unknown
+      }
     ): ProviderPresetApplyResult => {
-      const presetId = asPresetId(args?.presetId)
+      const provider = asProviderOrNull(args?.provider)
       const apiKey = asStringOrNull(args?.apiKey)
-      const configDirName = asStringOrUndefined(args?.configDirName)
-      const result = applyClaudeKaixuanPreset(
-        presetId,
-        apiKey === undefined && configDirName === undefined
-          ? {}
-          : { apiKey: apiKey ?? null, configDirName }
-      )
+      const configDirName = typeof args?.configDirName === 'string' ? args.configDirName : undefined
+      const options: { apiKey?: string | null; configDirName?: string } = {}
+      if (apiKey !== undefined) {
+        options.apiKey = apiKey
+      }
+      if (configDirName !== undefined) {
+        options.configDirName = configDirName
+      }
+      const result = applyClaudeProvider(provider, options)
       return result
     }
   )
 
   ipcMain.handle(
     'providerPresets:applyOpenCode',
-    (_event, args: { presetId?: unknown; apiKey?: unknown }): ProviderPresetApplyResult => {
-      const presetId = asPresetId(args?.presetId)
+    (
+      _event,
+      args: {
+        provider?: unknown
+        apiKey?: unknown
+        knownProviders?: unknown
+      }
+    ): ProviderPresetApplyResult => {
+      const provider = asProviderOrNull(args?.provider)
       const apiKey = asStringOrNull(args?.apiKey)
-      const result = applyOpenCodeKaixuanPreset(presetId, apiKey === undefined ? {} : { apiKey })
+      const knownProviders = asKnownProviders(args?.knownProviders ?? [])
+      const knownIds = buildKnownIds(knownProviders)
+      const result = applyOpenCodeProvider(
+        provider,
+        knownIds,
+        apiKey === undefined ? {} : { apiKey }
+      )
       return result
     }
   )
@@ -116,28 +177,37 @@ export function registerProviderPresetHandlers(): void {
     'providerPresets:getCurrent',
     (
       _event,
-      args: { agentId?: unknown }
-    ): {
-      presetId: KaixuanPresetId | null
-      configPath: string
-    } => {
+      args: {
+        agentId?: unknown
+        knownProviders?: unknown
+      }
+    ): { providerId: string | null; configPath: string } => {
       const agentId = asAgentId(args?.agentId)
+      const knownProviders = asKnownProviders(args?.knownProviders ?? [])
       if (agentId === 'codex') {
         const configPath = join(getSystemCodexHomePath(), 'config.toml')
         if (!existsSync(configPath)) {
-          return { presetId: null, configPath }
+          return { providerId: null, configPath }
         }
         try {
           const content = readFileSync(configPath, 'utf-8')
-          return { presetId: readActiveCodexKaixuanPreset(content), configPath }
+          const knownIds = buildKnownIds(knownProviders)
+          return {
+            providerId: readActiveCodexProvider(content, knownIds),
+            configPath
+          }
         } catch {
-          return { presetId: null, configPath }
+          return { providerId: null, configPath }
         }
       }
       if (agentId === 'claude') {
-        return readActiveClaudeKaixuanPresetFromDisk()
+        return readActiveClaudeProviderFromDisk(knownProviders)
       }
-      return readActiveOpenCodeKaixuanPresetFromDisk()
+      return readActiveOpenCodeProviderFromDisk(knownProviders)
     }
   )
 }
+
+// Why expose: tests that need to assert the registry helper against arbitrary
+// renderer input. Not part of the public IPC surface.
+export { buildKnownIds, asKnownProviders, MAX_KNOWN_PROVIDERS }
