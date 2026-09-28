@@ -38,6 +38,7 @@ const PASSING_AUDIT = {
   state: 'completed',
   verdict: 'pass',
   findings: [],
+  regression: { command: 'pnpm test', result: 'ok' },
   deps: ['impl_a'],
   reportPath: 'reports/audit-a.md'
 }
@@ -127,7 +128,8 @@ describe('audit verdict contract', () => {
         }
       ]).folded
     )
-    expect(result.blockers).toContain(
+    // Both missing pieces belong to one row, so they arrive joined rather than as two blockers.
+    expect(result.blockers.join('\n')).toContain(
       'audit_a: no report path recorded, so the audit cannot be re-read'
     )
   })
@@ -210,6 +212,7 @@ describe('recording a worker completion', () => {
       role: 'auditor',
       verdict: 'pass',
       report: 'reports/audit-a.md',
+      regression: { command: 'pnpm test', result: 'ok' },
       finding: [],
       file: [],
       dep: ['impl_a']
@@ -219,9 +222,41 @@ describe('recording a worker completion', () => {
       task: 'audit_a',
       verdict: 'pass',
       reportPath: 'reports/audit-a.md',
+      regression: { command: 'pnpm test', result: 'ok' },
       deps: ['impl_a']
     })
     expect(normalizeEntry(entry).verdict).toBe('pass')
+  })
+
+  it('refuses to record a verdict that claims nothing was tested', () => {
+    expect(() =>
+      buildDoneEntry({
+        run: 'r',
+        task: 'audit_a',
+        role: 'auditor',
+        verdict: 'pass',
+        report: 'r.md',
+        regression: null,
+        finding: [],
+        file: [],
+        dep: []
+      })
+    ).toThrow(/no regression recorded, so nothing proves the change was tested/)
+  })
+
+  it('accepts a failing regression run, because that is what a fail verdict is for', () => {
+    const entry = buildDoneEntry({
+      run: 'r',
+      task: 'audit_a',
+      role: 'auditor',
+      verdict: 'fail',
+      report: 'r.md',
+      regression: { command: 'pnpm test', result: '1 failing' },
+      finding: ['{"file":"src/a.ts","line":9,"severity":"blocker","evidence":"pnpm test fails"}'],
+      file: [],
+      dep: []
+    })
+    expect(entry.regression.result).toBe('1 failing')
   })
 
   it('refuses to record a pass that carries findings', () => {

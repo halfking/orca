@@ -195,14 +195,17 @@ orca orchestration gate-create --task <merge_task> \
 
 ```
 verdict: pass | pass_with_findings | fail
-findings: <n>            每条含 file:line、严重级、可复现证据
-regression: <命令> → <实际输出>
-blockers: [...]
+findings: [{file, line, severity, evidence}]   每条含 file:line、严重级、可复现证据
+regression: {command, result}                  跑了什么命令，实际输出是什么
+reportPath: <报告路径>
 ```
+
+`blockers` 不单独成字段：阻断项就是 `findings` 里 `severity: "blocker"` 的那些，避免同一件事有两个真相来源。
 
 - `fail` → 该 Task 的 merge Task 被 gate 阻断，走修复 → 重审（`--retry-of <dispatch_id>`，重跑时必须重复原 worktree/agent 选择，不继承放置）。
 - `pass_with_findings` → 归入"下一 owner"清单（上游 `coordinator-loop.md` 明确：review-only 的 `worker_done` 只授权综合发现，不授权协调者改文件；修复要么派工，要么明确交给用户）。
 - **审计者禁止修改实现文件**——发现问题的动作是产出 finding，不是自己修。
+- **`regression` 是"分别的测试"落地的地方**：verdict 必须附带跑过的命令和它的实际输出。`result` 允许是失败的——那正是 `fail` verdict 该有的样子——但必须存在。**没有 regression 的 verdict 是关于"测过了"的声明，不是证据。**
 
 ### 4.6 合并协议
 
@@ -329,14 +332,16 @@ node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task 
 
 # 审计者记录结论；--finding 可重复，--dep 指明它审计谁
 node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task audit_a \
-  --role auditor --dep impl_a --verdict pass --report reports/audit-a.md
+  --role auditor --dep impl_a --verdict pass --report reports/audit-a.md \
+  --regression '{"command":"pnpm test","result":"ok"}'
 
 node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task audit_b \
   --role auditor --dep impl_b --verdict pass_with_findings --report reports/b.md \
+  --regression '{"command":"pnpm test","result":"1 failing"}' \
   --finding '{"file":"src/b.ts","line":21,"severity":"minor","evidence":"missing edge case"}'
 ```
 
-**契约在写入时就校验**，不是等到门禁再报：`pass` 却带 findings、缺 `reportPath`、未知 verdict——当场拒绝并非零退出。理由是矛盾的 verdict 一旦落盘就会变成"事实"，在三步之后才被发现，代价是整个 Run 白跑。
+**契约在写入时就校验**，不是等到门禁再报：`pass` 却带 findings、缺 `reportPath`、**缺 `regression`**、未知 verdict——当场拒绝并非零退出。理由是矛盾的 verdict 一旦落盘就会变成"事实"，在三步之后才被发现，代价是整个 Run 白跑。
 
 **verdict 契约**（任何一条不满足就关门）：
 
@@ -354,7 +359,7 @@ node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task 
 - **冲突绝不自动解决**：abort 后把仓库切回基线分支、停在"什么都没发生"的状态，报告冲突分支，归属权交回给人；
 - **空计划不得报成功**：账本里没有可落地分支时报 `nothing to merge` 并以非零码退出——"全部合并完成"不能是一句关于零件事的断言。
 
-覆盖测试见 `orchestration-merge-gate.test.mjs`（28 例），其中 8 例在**真实临时 git 仓库**上跑：落后计数、脏工作区拒绝、独立分支合入、冲突中止且不选边、默认不改写分支历史、已合并不重复合、空计划不报成功。
+覆盖测试见 `orchestration-merge-gate.test.mjs`（30 例），其中 8 例在**真实临时 git 仓库**上跑：落后计数、脏工作区拒绝、独立分支合入、冲突中止且不选边、默认不改写分支历史、已合并不重复合、空计划不报成功。
 
 **已验证的端到端链路**（真实 git 仓库 + 真实账本文件，零手写 JSON）：`record-done` 记实现者完成 → 矛盾 verdict 被写入方拒绝 → 记两次合规审计 → `verify` 开门 → `merge --execute` 合入两个分支，两个文件都落在基线上。
 
@@ -367,7 +372,7 @@ node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task 
 | P0   | 本文档 + `.gitignore` 放行 + AGENTS.md 挂链                              | 文档可被 git 跟踪，AGENTS.md 可跳转                                           | ✅ 完成                                            |
 | P1   | **L3 可见性**：调度账本记录器 + 单命令调度视图                           | 合成 Run 数据产出完整视图：树、DAG 阻塞、argv、写集重叠矩阵                   | ✅ 完成（17/17 测试 + CLI 端到端 + lint/format）   |
 | P2   | **L0/L1 规程落地**：角色矩阵 + Task spec 模板 + 五波命令骨架编译         | 一个计划编译出完整 `orca` 命令序列，且非法计划在派发前就被拒                  | ✅ 完成（33 例测试 + 脚本生成 + `bash -n` 校验）   |
-| P3   | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | verdict 契约 fail-closed；真实 git 仓库上完成合入，冲突被显式报告而非静默处理 | ✅ 完成（28 例 + 端到端闭环，8 例跑真实 git 仓库） |
+| P3   | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | verdict 契约 fail-closed；真实 git 仓库上完成合入，冲突被显式报告而非静默处理 | ✅ 完成（30 例 + 端到端闭环，8 例跑真实 git 仓库） |
 | P4   | **真实 pilot**：在本仓库用两个真实任务跑完整链路                         | 两个任务零互相干扰、各自出 verdict、按建议顺序合并、账本可复盘                | 待定（需授权）                                     |
 
 **风险与边界**

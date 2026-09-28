@@ -51,6 +51,7 @@ export function normalizeEntry(raw) {
     outcome: raw.outcome ?? null,
     verdict: raw.verdict ?? null,
     findings: raw.findings ?? null,
+    regression: raw.regression ?? null,
     nextAction: Array.isArray(raw.nextAction) ? raw.nextAction : null,
     deps: Array.isArray(raw.deps) ? raw.deps : [],
     filesModified: Array.isArray(raw.filesModified) ? raw.filesModified : [],
@@ -124,6 +125,7 @@ export function foldLedger(entries) {
         outcome: null,
         verdict: null,
         findings: null,
+        regression: null,
         nextAction: null,
         files: new Set(),
         reportPaths: [],
@@ -167,6 +169,9 @@ export function foldLedger(entries) {
     }
     if (entry.findings != null) {
       task.findings = entry.findings
+    }
+    if (entry.regression != null) {
+      task.regression = entry.regression
     }
     if (entry.nextAction) {
       task.nextAction = entry.nextAction

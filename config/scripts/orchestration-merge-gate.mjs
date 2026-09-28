@@ -53,7 +53,7 @@ export function gitSucceeds(args, cwd) {
  * one cannot drift apart. A verdict is only as good as the evidence behind it, and contradictions
  * between the two are the failure this exists to catch.
  */
-export function verdictContractProblems(verdict, findings, reportCount) {
+export function verdictContractProblems(verdict, findings, reportCount, regression) {
   const problems = []
   if (!verdict) {
     problems.push('no verdict recorded')
@@ -78,6 +78,11 @@ export function verdictContractProblems(verdict, findings, reportCount) {
   }
   if (verdict && reportCount === 0) {
     problems.push('no report path recorded, so the audit cannot be re-read')
+  }
+  // A verdict with no command and no output behind it is a claim about testing, not evidence of it.
+  // The result may be a failure — that is exactly what a fail verdict is for — but it must exist.
+  if (verdict && (!regression || !regression.command)) {
+    problems.push('no regression recorded, so nothing proves the change was tested')
   }
   return problems
 }
@@ -111,8 +116,14 @@ export function validateVerdicts(folded) {
       role: task.role,
       verdict: task.verdict,
       findings: findings.length,
+      regression: task.regression ?? null,
       reports: task.reportPaths,
-      problems: verdictContractProblems(task.verdict, findings, task.reportPaths.length)
+      problems: verdictContractProblems(
+        task.verdict,
+        findings,
+        task.reportPaths.length,
+        task.regression
+      )
     })
   }
   return rows
@@ -338,6 +349,13 @@ export function buildDoneEntry(input) {
       evidence: parsed.evidence ?? null
     }
   })
+  const regression =
+    input.regression == null
+      ? null
+      : {
+          command: input.regression.command ?? null,
+          result: input.regression.result ?? null
+        }
   const entry = {
     run: input.run,
     event: 'worker-done',
@@ -348,12 +366,18 @@ export function buildDoneEntry(input) {
     outcome: input.outcome ?? null,
     verdict: input.verdict ?? null,
     findings,
+    regression,
     reportPath: input.report ?? null,
     filesModified: input.file,
     deps: input.dep
   }
   if (entry.verdict || input.role === 'auditor') {
-    const problems = verdictContractProblems(entry.verdict, findings, input.report ? 1 : 0)
+    const problems = verdictContractProblems(
+      entry.verdict,
+      findings,
+      input.report ? 1 : 0,
+      regression
+    )
     if (problems.length > 0) {
       throw new Error(`verdict contract violated: ${problems.join('; ')}`)
     }
@@ -369,7 +393,7 @@ export function renderVerify(result) {
   for (const row of result.rows) {
     lines.push(
       `  ${row.id.padEnd(14)} ${String(row.verdict ?? 'none').padEnd(20)} findings=${row.findings}` +
-        ` reports=${row.reports.length}`
+        ` reports=${row.reports.length} tested=${row.regression?.command ? 'yes' : 'NO'}`
     )
     for (const problem of row.problems) {
       lines.push(`      ! ${problem}`)
@@ -438,6 +462,19 @@ function asList(value) {
   return Array.isArray(value) ? value : [value]
 }
 
+/** `--regression '{"command":"...","result":"..."}'`, or `--regression-command`/`-result` separately. */
+function parseRegression(value) {
+  if (value === undefined || value === true) {
+    return null
+  }
+  const raw = Array.isArray(value) ? value.at(-1) : value
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return { command: raw, result: null }
+  }
+}
+
 /** Flags that repeat are the multi-value ones; everything else is taken last-wins. */
 function doneInput(args) {
   return {
@@ -449,6 +486,7 @@ function doneInput(args) {
     outcome: asList(args.outcome).at(-1) ?? null,
     verdict: asList(args.verdict).at(-1) ?? null,
     report: asList(args.report).at(-1) ?? null,
+    regression: parseRegression(args.regression),
     file: asList(args.file),
     finding: asList(args.finding),
     dep: asList(args.dep)
