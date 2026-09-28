@@ -316,6 +316,20 @@ node config/scripts/orchestration-wave-plan.mjs emit --plan plan.json --allow-wa
 - 生成的 shell 用 heredoc 承载多行 spec、用 shell 变量承载真实 Task id（`--deps "[\"${TASK_A}\"]"`），每个 Dispatch/Gate 都自动写一条账本。
 - 覆盖测试见 `orchestration-role-matrix.test.mjs`（12 例）与 `orchestration-wave-plan.test.mjs`（21 例）。
 
+#### 4.7.4 已验证：生成的命令形状真的被 orca 二进制接受
+
+编译出来的 argv 能不能被真实二进制解析，是和"函数返回了正确值"完全不同的一层。kaixuan provider preset 那轮教训过：24 个断言全绿，CLI 却把整个字段静默丢弃。所以：
+
+```text
+node config/scripts/orchestration-argv-contract-check.mjs
+```
+
+把编译器产出的每条命令直接喂给 `orca` 二进制并归类：`ACCEPTED`（参数解析通过，因运行时未启动而停在 `runtime_unavailable`）、`REJECTED`（二进制不认这个 flag）、`SHAPE-ERROR`（flag 认得但必填参数缺失）、`UNKNOWN`。
+
+**脚本每次运行先跑两个反向对照**（不存在的 flag、缺 `--task`），两者都必须被判为拒绝；判不出来就直接非零退出并说明"本检查已失去辨别能力"——一个无法失败的检查器比没有检查器更糟。
+
+当前结果：7 条命令全部 `ACCEPTED`，含 `--worktree new-child`、`--base-branch`、`--setup`、`--deps`、`--agent`、`--model`、`--effort` 与 gate 的 `--options`。
+
 #### 4.7.3 已实现：`config/scripts/orchestration-merge-gate.mjs`
 
 把 4.5 的 verdict 契约和 4.6 的合并协议变成 fail-closed 的两道闸：
