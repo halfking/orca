@@ -73,6 +73,29 @@ DAG, the verdict contract, and the scheduling-ledger visibility rules are in
 [`docs/reference/parallel-task-orchestration.md`](./docs/reference/parallel-task-orchestration.md).
 Coordinate them with `orca orchestration`, not with a non-Orca subagent tool.
 
+## kaixuan Provider Preset (Codex / ClaudeCode / OpenCode)
+
+The AccountsPane kaixuan section exposes a built-in `kaixuan-local` / `kaixuan-kxpms` gateway pair
+plus a user-editable OpenAI-compatible provider registry. Apply functions live in
+`src/main/{codex,claude,opencode}/{agent}-apply-provider-preset.ts`; the shared type module is
+`src/shared/provider-preset-types.ts`; the UI is `accounts-pane-kaixuan-section.tsx` and the
+sibling `accounts-pane-kaixuan-{header,agent-card,custom-providers}.tsx`. Live-CLI verification
+findings and a fix-by-fix rundown are in
+[`docs/bug-reproductions/kaixuan-provider-preset-live-audit.md`](./docs/bug-reproductions/kaixuan-provider-preset-live-audit.md)
+— read it before changing any of the three apply modules.
+
+Two rules from that audit apply to every change here:
+
+- **Apply-shape tests prove the writer, not the consumer.** A config that parses cleanly can
+  still 401 against a real gateway (e.g. Codex `experimental_bearer_token` written alongside
+  `env_key` causes codex to abort on the missing env var). Re-run the real CLI after any change to
+  the apply modules; the audit doc shows the sandbox + smoke pattern.
+- **Smoke scripts that drive these apply functions must isolate HOME.** The apply functions call
+  `homedir()` / `XDG_CONFIG_HOME` / `CLAUDE_CONFIG_DIR` at runtime; `vi.mock` only applies inside
+  vitest, a plain `tsx` import will write to the user's real `~/.codex/config.toml`. Set
+  `HOME=<tmp>` (Codex follows it), pass `{XDG_CONFIG_HOME}` (OpenCode), or set
+  `CLAUDE_CONFIG_DIR=<tmp>` (ClaudeCode).
+
 ## Cross-Platform Support
 
 Orca targets macOS, Linux, and Windows. Keep all platform-dependent behavior behind runtime checks:
