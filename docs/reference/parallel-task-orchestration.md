@@ -318,19 +318,27 @@ node config/scripts/orchestration-wave-plan.mjs emit --plan plan.json --allow-wa
 - 生成的 shell 用 heredoc 承载多行 spec、用 shell 变量承载真实 Task id（`--deps "[\"${TASK_A}\"]"`），每个 Dispatch/Gate 都自动写一条账本。
 - 覆盖测试见 `orchestration-role-matrix.test.mjs`（12 例）与 `orchestration-wave-plan.test.mjs`（21 例）。
 
-#### 4.7.4 已验证：生成的命令形状真的被 orca 二进制接受
+#### 4.7.4 已修正（P4 实跑后）：形状检查分两层，默认那层不碰运行时
 
-编译出来的 argv 能不能被真实二进制解析，是和"函数返回了正确值"完全不同的一层。kaixuan provider preset 那轮教训过：24 个断言全绿，CLI 却把整个字段静默丢弃。所以：
+编译出来的 argv 能不能被真实二进制解析，是和"函数返回了正确值"完全不同的一层。kaixuan provider preset 那轮教训过：24 个断言全绿，CLI 却把整个字段静默丢弃。
 
 ```text
-node config/scripts/orchestration-argv-contract-check.mjs
+node config/scripts/orchestration-argv-contract-check.mjs            # schema 层，CI 安全
+node config/scripts/orchestration-argv-contract-check.mjs --live     # 实探，需运行中的 Orca
 ```
 
-把编译器产出的每条命令直接喂给 `orca` 二进制并归类：`ACCEPTED`（参数解析通过，因运行时未启动而停在 `runtime_unavailable`）、`REJECTED`（二进制不认这个 flag）、`SHAPE-ERROR`（flag 认得但必填参数缺失）、`UNKNOWN`。
+**为什么从原来的一层拆成两层**：原实现把"运行时没启动、二进制停在 `runtime_unavailable`"判成 `ACCEPTED`——而这正是开发期一直所处的状态。于是它稳定地报出 7 条 `ACCEPTED`，其中就包括真实运行会失败的那条命令。**参数被解析不等于值被求值。**
 
-**脚本每次运行先跑两个反向对照**（不存在的 flag、缺 `--task`），两者都必须被判为拒绝；判不出来就直接非零退出并说明"本检查已失去辨别能力"——一个无法失败的检查器比没有检查器更糟。
+| 层                        | 手段                                 | 回答的问题                                     | 副作用                       |
+| ------------------------- | ------------------------------------ | ---------------------------------------------- | ---------------------------- |
+| schema（默认）            | `orca agent-context` 里二进制自己的 flag 声明 | 我们发的 flag 二进制认不认                   | 无（不起运行时、不建任何东西）|
+| 实探（`--live` 显式）     | 真的把命令交给二进制                 | 二进制解析整条命令行后会不会到运行时         | **有**：活着的运行时会执行它解析到的东西 |
 
-当前结果：7 条命令全部 `ACCEPTED`，含 `--worktree new-child`、`--base-branch`、`--setup`、`--deps`、`--agent`、`--model`、`--effort` 与 gate 的 `--options`。
+实探的归类：`REJECTED`（flag 被拒）/ `SHAPE-ERROR`（flag 认得但必填缺失）/ `REACHABLE`（运行时被问到，值不成立）/ `UNVERIFIED`（运行时根本没被问到——旧的 `ACCEPTED` 就是这一类，现在它让检查失败而不是通过）。
+
+两个反向对照：schema 层用一条不存在的 flag（无副作用），实探层用不存在的 flag 与缺 `--task` 的真实调用；判不出来就非零退出并声明"本检查已失去辨别能力"。
+
+**这一层自己有个教训**：在活着的 Orca 上跑旧版检查时，它**真的建了三个 Task**（`task-create` 被执行了），留在 adopted Run 里，而没有任何命令能删掉它们。所以实探现在是显式 `--live`，并在输出里写明这一点。
 
 #### 4.7.5 已验证：生成的脚本被真正执行过
 
@@ -347,6 +355,18 @@ pnpm run verify:orchestration-generated-script
 3. **账本条目被整个丢掉**——shell helper 里写的是 `{...entry}`，而 `entry` 是 JSON **字符串**，展开成的是 `{0:'{',1:'"'…}`。结果每次派发写进账本的 `role`/`agent`/`model`/`placement`/`state`/`nextAction` **全是 null**：调度路径可见这个特性会只记 id，等于没有。
 
 第 3 条是这一整轮最值得记住的：**82 个单测全绿、argv 契约全绿、`bash -n` 通过，而特性本身是不工作的。** 只有把脚本真正执行一次、把产出的账本真正读一遍，才看得见。
+
+#### 4.7.6 P4 实跑补上的第四个 bug：**桩收据自己编的形状**
+
+上一步的桩把 `run-create` 答成 `{ result: { id: 'run_stub' } }`，而真实二进制答的是：
+
+```json
+{ "result": { "run": { "id": "run_…", "coordinator_handle": "term_…" } } }
+```
+
+生成脚本里的 id 提取器只认 `result.task` 和 `result`，于是 `RUN_ID` 是空串。实跑的表现是：**Run 开了、四个 worker 派出去了，然后每一条账本记录都失败**——`Ledger entry requires a non-empty "run"`。
+
+**一个自造收据的桩，教给检查的是一份运行时从未承诺过的契约。** 桩现在按真实收据作答，检查里多一条断言：每一条账本行的 `run` 都等于真实 Run id（对旧提取器红，对新提取器绿）。
 
 #### 4.7.3 已实现：`config/scripts/orchestration-merge-gate.mjs`
 
@@ -413,7 +433,22 @@ node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task 
 | P2   | **L0/L1 规程落地**：角色矩阵 + Task spec 模板 + 五波命令骨架编译         | 一个计划编译出完整 `orca` 命令序列，且非法计划在派发前就被拒                  | ✅ 完成（40 例测试 + 脚本生成 + `bash -n` 校验）   |
 | P3   | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | verdict 契约 fail-closed；真实 git 仓库上完成合入，冲突被显式报告而非静默处理 | ✅ 完成（37 例 + 端到端闭环，14 例跑真实 git 仓库） |
 | 审计 | **对上述三层做批判式复核**：模板跑自己门禁、失败方向、worktree 真路径 | 模板形状能过自己的门禁；负例真被拒；基线在别的 worktree 时真能合            | ✅ 完成（4 个真实 CLI 正/反例 + 修复见 4.7.3）    |
-| P4   | **真实 pilot**：在本仓库用两个真实任务跑完整链路                         | 两个任务零互相干扰、各自出 verdict、按建议顺序合并、账本可复盘                | 待定（需授权）                                     |
+| P4   | **真实 pilot**：在本仓库用两个真实任务跑完整链路                         | 两个任务零互相干扰、各自出 verdict、按建议顺序合并、账本可复盘                | 进行中（见 4.7.7）                                   |
+
+#### 4.7.7 P4 真实 pilot：前四个缺陷只有真跑才看得见
+
+P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orca.app` 1.4.197）里派发真实 worker，四个缺陷当场暴露，**每一个在修复前的检查里都是全绿**：
+
+| # | 缺陷                                                                 | 现场表现                                                                 | 为什么检查没抓到                                       | 修法                                          |
+| - | -------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------ | --------------------------------------------- |
+| 1 | 生成脚本从不带 `--from`                                                | 第一条派发就死：`selector_not_found`，而 selector 是 `new-child`        | 桩二进制对任何命令都给收据，不校验参数                  | 从 run-create 收据取 `coordinator_handle`，每条派发都带；取不到就拒绝发脚本 |
+| 2 | argv 校验把"运行时没启动"判成 `ACCEPTED`                             | 它稳定报 7 条 `ACCEPTED`，其中包含真实会失败的那条                      | 开发期运行时一直没启动，fail-open 恰好是常态            | 拆成 schema（默认）+ 实探（`--live`）；未求值即 `UNVERIFIED` 并让检查失败 |
+| 3 | `claude` 没有预信任预设                                                | 每个 claude worker 停在首次启动的信任弹窗，dispatch 死在 `agent_readiness` | 桩不启动 agent，弹窗不存在                             | `preflightTrust: 'claude'`，只写 `~/.claude.json` 的 `hasTrustDialogAccepted` |
+| 4 | 桩自造 `run-create` 收据形状                                          | Run 开了、worker 派出去了，然后每条账本记录都失败（`run` 为空）          | 桩答的是 `{result:{id}}`，真实是 `{result:{run:{id}}}`   | 桩按真实收据作答 + 断言每行 `run` 非空           |
+
+**还有一个不是本仓库的**：opencode 的 `bash`/`edit` 权限默认 `ask`，而 supervised worker 没人值守，于是每个 worker 卡在自己的权限弹窗上。和缺陷 3 同源——**任何"必须有人在终端里点一下"的首次启动流程，都会让 supervised 派发停在 `agent_readiness`**。本次由协调者代答"Allow always"（opencode 侧的措辞是"until OpenCode is restarted"，即会话级，不是全局配置）。
+
+**关于第 1 条，值得单独记住**：报错信息指向 `--worktree` 的 selector，而真正的原因是命令从头到尾没有指名 Run 的协调者。`worker-start` 被 fence 在绑定到该 Run 的终端上，`--worktree new-child` 又要通过同一个绑定去解析协调者工作区。同一条 argv 加 `--from` 就起得来，不加就失败——**一个指错位置的错误信息，比错误本身更贵**。
 
 **风险与边界**
 
