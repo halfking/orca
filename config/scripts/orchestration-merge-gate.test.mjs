@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   buildDoneEntry,
   buildMergePlan,
+  findBaseWorktree,
   computeMergeReadiness,
   executeMerge,
   inspectRepository,
@@ -34,6 +35,8 @@ function viewOf(entries) {
 const PASSING_AUDIT = {
   task: 'audit_a',
   role: 'auditor',
+  agent: 'claude',
+  model: 'judge',
   event: 'worker-done',
   state: 'completed',
   verdict: 'pass',
@@ -53,6 +56,8 @@ const PASSING_AUDIT_B = {
 const IMPL_A = {
   task: 'impl_a',
   role: 'implementer',
+  agent: 'codex',
+  model: 'writer',
   event: 'worker-done',
   state: 'completed',
   filesModified: ['src/a.ts'],
@@ -62,6 +67,8 @@ const IMPL_A = {
 const IMPL_B = {
   ...IMPL_A,
   task: 'impl_b',
+  agent: 'claude',
+  model: 'cheap',
   filesModified: ['src/b.ts'],
   placement: { worktree: 'task-b', base: 'feature/b', isolation: 'worktree' }
 }
@@ -189,8 +196,55 @@ describe('audit verdict contract', () => {
     expect(result.ready).toBe(true)
   })
 
-  it('does not invent a conflict when the ledger never recorded an agent', () => {
-    expect(computeMergeReadiness(viewOf([IMPL_A, PASSING_AUDIT]).folded).ready).toBe(true)
+  it('refuses to pass an audit whose independence cannot be checked at all', () => {
+    // Fail-open here meant a hand-dispatched audit waved itself through, which is the one case
+    // where a rubber stamp is most likely.
+    const result = computeMergeReadiness(
+      viewOf([
+        { ...IMPL_A, agent: 'claude', model: 'm' },
+        { ...PASSING_AUDIT, agent: null, model: null }
+      ]).folded
+    )
+    expect(result.ready).toBe(false)
+    expect(result.blockers.join('\n')).toContain('recorded no agent')
+  })
+
+  it('covers the implementation two hops away, the way a five-wave plan is shaped', () => {
+    // impl <- test <- audit. The audit waits on the test, but judges the code impl wrote.
+    const result = computeMergeReadiness(
+      viewOf([
+        { ...IMPL_A, agent: 'codex', model: 'writer' },
+        {
+          ...IMPL_B,
+          task: 'test_a',
+          role: 'test-author',
+          agent: 'claude',
+          model: 'cheap',
+          deps: ['impl_a']
+        },
+        { ...PASSING_AUDIT, deps: ['test_a'] }
+      ]).folded
+    )
+    expect(result.ready).toBe(true)
+  })
+
+  it('still catches a rubber stamp that sits two hops from the implementation', () => {
+    const result = computeMergeReadiness(
+      viewOf([
+        { ...IMPL_A, agent: 'codex', model: 'shared' },
+        {
+          ...IMPL_B,
+          task: 'test_a',
+          role: 'test-author',
+          agent: 'claude',
+          model: 'cheap',
+          deps: ['impl_a']
+        },
+        { ...PASSING_AUDIT, deps: ['test_a'], agent: 'codex', model: 'shared' }
+      ]).folded
+    )
+    expect(result.ready).toBe(false)
+    expect(result.blockers.join('\n')).toContain('rubber stamp')
   })
 
   it('blocks a task that is not completed, even with a passing audit', () => {
@@ -508,6 +562,42 @@ describe('merge execution against a real repository', () => {
     const plan = buildMergePlan(viewOf([IMPL_A]), repo, 'main')
     expect(plan.ready).toBe(false)
     expect(plan.readiness.blockers).toContain('impl_a: landed without an audit verdict')
+  })
+
+  it('merges into the worktree that already holds the base branch', () => {
+    // A parallel run lives on worktrees, so the base branch is normally checked out in one of
+    // them. A bare `git checkout main` from anywhere else fails outright.
+    // macOS resolves /var to /private/var, and git reports the resolved path, so compare those.
+    const baseWorktree = join(realpathSync(join(repo, '..')), `base-wt-${repo.slice(-6)}`)
+    // Build the feature branches first: featureBranch() parks on `main` on its way out, and that
+    // would be refused once another worktree holds main.
+    featureBranch('feature/a', { 'src/a.ts': 'a\n' })
+    featureBranch('feature/b', { 'src/b.ts': 'b\n' })
+    runGit(['checkout', '--detach', 'HEAD'], repo)
+    runGit(['worktree', 'add', '-q', baseWorktree, 'main'], repo)
+
+    expect(findBaseWorktree(repo, 'main')).toBe(baseWorktree)
+
+    const plan = buildMergePlan(
+      viewOf([IMPL_A, IMPL_B, PASSING_AUDIT, PASSING_AUDIT_B]),
+      repo,
+      'main'
+    )
+    const outcome = executeMerge(plan, repo)
+    expect(outcome.outcome).toBe('merged')
+    expect(runGit(['ls-tree', '-r', '--name-only', 'main'], baseWorktree)).toContain('src/a.ts')
+
+    runGit(['worktree', 'remove', '--force', baseWorktree], repo)
+  })
+
+  it('refuses to merge into a dirty base worktree rather than half-applying', () => {
+    featureBranch('feature/a', { 'src/a.ts': 'a\n' })
+    writeFileSync(join(repo, 'README.md'), 'uncommitted\n')
+    const plan = buildMergePlan(viewOf([IMPL_A, PASSING_AUDIT]), repo, 'main')
+    expect(plan.ready).toBe(false)
+    const outcome = executeMerge(plan, repo)
+    expect(outcome.outcome).toMatch(/uncommitted changes/)
+    expect(outcome.merged).toEqual([])
   })
 
   it('never reports success for a plan that names no landable branch', () => {

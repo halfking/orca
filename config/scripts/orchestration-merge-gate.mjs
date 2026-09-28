@@ -59,6 +59,36 @@ export function gitSucceeds(args, cwd) {
 }
 
 /**
+ * The directory that actually has the base branch checked out, or null when nothing holds it.
+ *
+ * Why this exists: a parallel run is built on git worktrees, so the base branch is normally
+ * checked out in one of them and a bare `git checkout <base>` from anywhere else fails outright —
+ * git refuses to check out a branch twice. Merging into the worktree that already holds the base is
+ * both the thing git permits and the thing an operator expects.
+ */
+export function findBaseWorktree(repo, base) {
+  let listed
+  try {
+    listed = runGit(['worktree', 'list', '--porcelain'], repo)
+  } catch {
+    return null
+  }
+  let current = null
+  for (const line of listed.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      current = line.slice('worktree '.length)
+    } else if (line.startsWith('branch ') && current) {
+      const ref = line.slice('branch '.length).trim()
+      if (ref === `refs/heads/${base}`) {
+        return current
+      }
+      current = null
+    }
+  }
+  return null
+}
+
+/**
  * Read what the real repository says, so the plan is built on branches that exist and a base that
  * is not moving under the merge. `behind` is the number of base commits a branch has not picked up,
  * which is the whole reason a dispatch-time staleness check cannot be the merge-time check.
@@ -158,8 +188,17 @@ export function buildMergePlan(view, repo, base) {
  */
 export function executeMerge(plan, repo, { rebase = false } = {}) {
   const base = plan.inspection.base
+  // Merge where the base branch already lives rather than trying to check it out and failing.
+  const target = findBaseWorktree(repo, base) ?? repo
   const merged = []
   const todo = plan.steps.filter((step) => !step.alreadyMerged)
+  if (todo.length > 0 && !plan.inspection.worktreeClean) {
+    return {
+      merged,
+      conflict: null,
+      outcome: `refused: the worktree holding ${base} has uncommitted changes`
+    }
+  }
   if (todo.length === 0) {
     // Saying "all branches merged" for an empty plan would be a success claim about nothing.
     return {
@@ -178,20 +217,20 @@ export function executeMerge(plan, repo, { rebase = false } = {}) {
     }
     try {
       if (rebase) {
-        runGit(['checkout', step.branch], repo)
-        runGit(['rebase', base], repo)
+        runGit(['checkout', step.branch], target)
+        runGit(['rebase', base], target)
       }
-      runGit(['checkout', base], repo)
+      runGit(['checkout', base], target)
       runGit(
         ['merge', '--no-ff', '-m', `merge ${step.branch} (task ${step.task})`, step.branch],
-        repo
+        target
       )
       merged.push(step.branch)
     } catch (error) {
-      gitSucceeds(['merge', '--abort'], repo)
-      gitSucceeds(['rebase', '--abort'], repo)
+      gitSucceeds(['merge', '--abort'], target)
+      gitSucceeds(['rebase', '--abort'], target)
       // Leave the repository on the base branch, mid-nothing, whoever won the race to fail.
-      gitSucceeds(['checkout', base], repo)
+      gitSucceeds(['checkout', base], target)
       return {
         merged,
         conflict: { branch: step.branch, reason: 'conflict', detail: String(error.message) },
@@ -298,6 +337,8 @@ function doneInput(args) {
     run: args.run,
     task: args.task,
     role: asList(args.role).at(-1) ?? null,
+    agent: asList(args.agent).at(-1) ?? null,
+    model: asList(args.model).at(-1) ?? null,
     dispatch: asList(args.dispatch).at(-1) ?? null,
     state: asList(args.state).at(-1) ?? 'completed',
     outcome: asList(args.outcome).at(-1) ?? null,

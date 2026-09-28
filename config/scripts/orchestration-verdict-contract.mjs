@@ -14,6 +14,48 @@
 export const PASSING_VERDICTS = new Set(['pass', 'pass_with_findings'])
 export const ALL_VERDICTS = new Set(['pass', 'pass_with_findings', 'fail'])
 
+function asList(value) {
+  if (value == null) {
+    return []
+  }
+  return Array.isArray(value) ? value : [...value]
+}
+
+/**
+ * Every task reachable from a task by following dependencies, not just its immediate ones.
+ *
+ * Why transitive: an audit normally waits on the test task, which waits on the implementation. The
+ * code the audit judges was written by the implementation task, so that is the task independence
+ * has to be measured against and the task whose landing the verdict has to cover. Looking only at
+ * direct dependencies made a five-wave plan impossible to merge and let a same-agent audit slip
+ * through, both for the same reason.
+ */
+export function dependencyClosure(taskId, tasks) {
+  const byId = new Map(tasks.map((task) => [task.id, task]))
+  const seen = new Set()
+  const stack = [...asList(byId.get(taskId)?.deps)]
+  while (stack.length > 0) {
+    const id = stack.pop()
+    if (seen.has(id)) {
+      continue
+    }
+    seen.add(id)
+    for (const dep of asList(byId.get(id)?.deps)) {
+      stack.push(dep)
+    }
+  }
+  return seen
+}
+
+/** Landable tasks this audit covers: everything in its dependency closure. Returns a Set. */
+export function auditedTaskIds(auditor, tasks) {
+  return new Set(
+    [...dependencyClosure(auditor.id, tasks)].filter(
+      (id) => tasks.find((task) => task.id === id)?.role !== 'auditor'
+    )
+  )
+}
+
 export function verdictContractProblems(verdict, findings, reportCount, regression) {
   const problems = []
   if (!verdict) {
@@ -98,13 +140,19 @@ export function validateVerdicts(folded) {
  * stamp. A separate Dispatch and a separate worktree are not enough on their own — when the agent
  * and the model are identical there is one judge, not two.
  *
- * Returns a message describing the problem, or null when the audit stands on its own. An unknown
- * agent is not a conflict: there is nothing to compare against, and inventing a violation from
- * missing data teaches operators to ignore this.
+ * Returns a message describing the problem, or null when the audit stands on its own. An audit
+ * that never recorded an agent is a problem of its own, reported by the caller: independence that
+ * cannot be checked is not independence.
  */
 export function auditIndependenceProblem(auditor, audited) {
-  if (!auditor?.agent || !audited?.agent) {
+  if (!audited?.agent) {
     return null
+  }
+  if (!auditor?.agent) {
+    return (
+      `${auditor.id} audits ${audited.id} but recorded no agent, so its independence cannot be ` +
+      'checked — dispatch it through the compiled plan, or record the agent with record-done'
+    )
   }
   if (auditor.agent !== audited.agent) {
     return null
@@ -147,7 +195,12 @@ export function computeMergeReadiness(folded) {
     if (task.state !== 'completed') {
       blockers.push(`${task.id}: state is ${task.state}, not completed`)
     }
-    const covering = auditors.filter((auditor) => auditor.deps.has(task.id))
+    // An audit covers what it waited for, all the way down. In a five-wave plan the implementation
+    // task sits two hops away and is still the work being judged; matching on direct dependencies
+    // alone both blocked legitimate runs and let a same-agent audit through.
+    const covering = auditors.filter((auditor) =>
+      auditedTaskIds(auditor, folded.tasks).has(task.id)
+    )
     if (covering.length === 0) {
       blockers.push(`${task.id}: landed without an audit verdict`)
       continue
@@ -211,6 +264,10 @@ export function buildDoneEntry(input) {
     event: 'worker-done',
     task: input.task,
     role: input.role ?? null,
+    // The gate measures audit independence against these. Without them the check is not weaker, it
+    // is absent, so a completion recorded by hand has to say who did the work.
+    agent: input.agent ?? null,
+    model: input.model ?? null,
     dispatch: input.dispatch ?? null,
     state: input.state ?? 'completed',
     outcome: input.outcome ?? null,

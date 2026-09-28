@@ -16,7 +16,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { resolveLaunch, roleSpec } from './orchestration-role-matrix.mjs'
-import { auditIndependenceProblem } from './orchestration-verdict-contract.mjs'
+import { auditIndependenceProblem, auditedTaskIds } from './orchestration-verdict-contract.mjs'
 
 const SELF_DIR = import.meta.dirname
 
@@ -242,7 +242,9 @@ export function validatePlan(plan) {
   // Dispatches are not enough when the agent and the model behind them are the same ones that wrote
   // the change, so the plan is refused here rather than at the merge gate three waves later.
   for (const auditor of tasks.filter((task) => task.role === 'auditor')) {
-    for (const dep of auditor.deps ?? []) {
+    // The whole dependency closure, not the immediate dependencies: the code being judged was
+    // written at the far end of it.
+    for (const dep of auditedTaskIds(auditor, tasks)) {
       const problem = auditIndependenceProblem(
         { id: auditor.id, ...launches.get(auditor.id) },
         { id: dep, ...launches.get(dep) }

@@ -206,7 +206,8 @@ reportPath: <报告路径>
 - `pass_with_findings` → 归入"下一 owner"清单（上游 `coordinator-loop.md` 明确：review-only 的 `worker_done` 只授权综合发现，不授权协调者改文件；修复要么派工，要么明确交给用户）。
 - **审计者禁止修改实现文件**——发现问题的动作是产出 finding，不是自己修。
 - **`regression` 是"分别的测试"落地的地方**：verdict 必须附带跑过的命令和它的实际输出。`result` 允许是失败的——那正是 `fail` verdict 该有的样子——但必须存在。**没有 regression 的 verdict 是关于"测过了"的声明，不是证据。**
-- **审计必须真的是"第二意见"**：审计任务与它审计的任务若**同一个 agent 且同一个 model**（含双方都未指定、走 agent 默认值的情形），计划编译器在派发前直接拒绝，合并门禁也会在落地前阻断。理由是：换个 Dispatch、换个 worktree 都救不了"审你的人就是写代码的人"。**同 agent 但不同 model 可以，不同 agent 同 model 也可以**——独立性关乎裁判，不关乎工具。
+- **审计必须真的是"第二意见"**：审计任务与它审计的任务若**同一个 agent 且同一个 model**，计划编译器在派发前直接拒绝，合并门禁也会在落地前阻断。理由是：换个 Dispatch、换个 worktree 都救不了"审你的人就是写代码的人"。**同 agent 但不同 model 可以，不同 agent 同 model 也可以**——独立性关乎裁判，不关乎工具。
+- **独立性判定 fail-closed**：账本里那条审计**没记 agent** 时门禁关门，不放行。缺数据不是"没问题"，是"没法判断"；把无法检查的独立性当作独立性，等于给"忘了写"发了一张通行证。要么走编译出来的计划（派发时自动落 agent/model），要么手工 `record-done` 时带上 `--agent/--model`——`record-done` 接受这两个参数，正是为了让手工派发和自动派发在门禁眼里没有区别。
 
 ### 4.6 合并协议
 
@@ -364,8 +365,10 @@ node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task 
   --role implementer --outcome succeeded --file src/a.ts
 
 # 审计者记录结论；--finding 可重复，--dep 指明它审计谁
+# --agent/--model 不是可选项：审计独立性就是拿这两个值去和被审计任务比对，缺了就关门
 node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task audit_a \
-  --role auditor --dep impl_a --verdict pass --report reports/audit-a.md \
+  --role auditor --agent claude --model <T> --dep test_a --verdict pass \
+  --report reports/audit-a.md \
   --regression '{"command":"pnpm test","result":"ok"}'
 
 node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task audit_b \
@@ -382,19 +385,22 @@ node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task 
 - `pass` 却带 findings、`pass_with_findings` 却没 findings、`fail` 却没有任何 blocker 级 finding——**声明与证据自相矛盾即拒绝**；
 - 每条 finding 必须有 `file:line` 和可复现 evidence；
 - **任何 verdict 都必须有 `reportPath`**：没人能重读的审计不是审计，是一句声明；
-- 覆盖关系读 DAG 而非命名：`audit_a` 审计 `impl_a`，因为它的 `deps` 指向 `impl_a`；
+- 覆盖关系读 DAG 而非命名，而且是**传递闭包**：审计等待的是测试任务，测试等待的是实现任务，被判读的代码写在最远端那一跳。`audit_a --dep test_a` 就算覆盖了 `impl_a`，只认直接依赖会让五波模板永远过不了自己的门禁，同时放过"审计者就是实现者"的那一种——两个症状，同一个根因；
 - 未审计的落地任务、未完成的任务、未决的 gate、被判 fail 的 gate——全部阻断。
 
 **合并执行**：
 
 - 合并顺序来自账本的写集分析（少冲突先合），不是任务名顺序；
+- **合入"已经持有基线分支的那个 worktree"**：整个方案建在 worktree 上，所以 `main` 通常被另一个 worktree 检出着，`git checkout main` 会直接失败（`'main' 已经被工作区 ... 使用`）。合并前先解析基线落在哪，指向那个目录执行；解析不到才退回调用方当前目录。持有基线的工作区有未提交改动时**整个计划拒绝执行**，不做半个合并；
 - **默认不 rebase**。rebase 会改写常常已经推送过的特性分支，所以它是 `--rebase` 显式选项；默认路径只报告每个分支落后基线多少个 commit，并提示接受改写时的命令；
 - **冲突绝不自动解决**：abort 后把仓库切回基线分支、停在"什么都没发生"的状态，报告冲突分支，归属权交回给人；
 - **空计划不得报成功**：账本里没有可落地分支时报 `nothing to merge` 并以非零码退出——"全部合并完成"不能是一句关于零件事的断言。
 
-覆盖测试见 `orchestration-merge-gate.test.mjs`（30 例），其中 8 例在**真实临时 git 仓库**上跑：落后计数、脏工作区拒绝、独立分支合入、冲突中止且不选边、默认不改写分支历史、已合并不重复合、空计划不报成功。
+覆盖测试见 `orchestration-merge-gate.test.mjs`（37 例），其中 14 例在**真实临时 git 仓库**上跑：落后计数、脏工作区拒绝、独立分支合入、冲突中止且不选边、默认不改写分支历史、已合并不重复合、空计划不报成功、**基线被别的 worktree 持有时仍能合入**、**持有基线的工作区是脏的就整单拒绝**。
 
 **已验证的端到端链路**（真实 git 仓库 + 真实账本文件，零手写 JSON）：`record-done` 记实现者完成 → 矛盾 verdict 被写入方拒绝 → 记两次合规审计 → `verify` 开门 → `merge --execute` 合入两个分支，两个文件都落在基线上。
+
+**审计轮在真实 CLI 上的四个正/反例**（真实 git + 真实 JSONL 账本，非单测夹具）：审计未记 agent → `MERGE GATE: CLOSED`，列出每个被审计任务；审计与实现同 agent 同 model → CLOSED，报"rubber stamp"；同 agent 不同 model → OPEN；不同 agent 同 model → OPEN。同时 `main` 只存在于另一个 worktree 时，`verify` 开门、`merge --execute` 把文件合进那个 worktree 的 `main`。
 
 ---
 
@@ -403,9 +409,10 @@ node config/scripts/orchestration-merge-gate.mjs record-done --run <run> --task 
 | 阶段 | 内容                                                                     | 验收标准                                                                      | 状态                                               |
 | ---- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------- |
 | P0   | 本文档 + `.gitignore` 放行 + AGENTS.md 挂链                              | 文档可被 git 跟踪，AGENTS.md 可跳转                                           | ✅ 完成                                            |
-| P1   | **L3 可见性**：调度账本记录器 + 单命令调度视图                           | 合成 Run 数据产出完整视图：树、DAG 阻塞、argv、写集重叠矩阵                   | ✅ 完成（17/17 测试 + CLI 端到端 + lint/format）   |
-| P2   | **L0/L1 规程落地**：角色矩阵 + Task spec 模板 + 五波命令骨架编译         | 一个计划编译出完整 `orca` 命令序列，且非法计划在派发前就被拒                  | ✅ 完成（33 例测试 + 脚本生成 + `bash -n` 校验）   |
-| P3   | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | verdict 契约 fail-closed；真实 git 仓库上完成合入，冲突被显式报告而非静默处理 | ✅ 完成（30 例 + 端到端闭环，8 例跑真实 git 仓库） |
+| P1   | **L3 可见性**：调度账本记录器 + 单命令调度视图                           | 合成 Run 数据产出完整视图：树、DAG 阻塞、argv、写集重叠矩阵                   | ✅ 完成（19 例测试 + CLI 端到端 + lint/format）   |
+| P2   | **L0/L1 规程落地**：角色矩阵 + Task spec 模板 + 五波命令骨架编译         | 一个计划编译出完整 `orca` 命令序列，且非法计划在派发前就被拒                  | ✅ 完成（40 例测试 + 脚本生成 + `bash -n` 校验）   |
+| P3   | **L2/L4 门禁与合并**：verdict 校验器 + 合并脚本（rebase→回归→合入→冲突） | verdict 契约 fail-closed；真实 git 仓库上完成合入，冲突被显式报告而非静默处理 | ✅ 完成（37 例 + 端到端闭环，14 例跑真实 git 仓库） |
+| 审计 | **对上述三层做批判式复核**：模板跑自己门禁、失败方向、worktree 真路径 | 模板形状能过自己的门禁；负例真被拒；基线在别的 worktree 时真能合            | ✅ 完成（4 个真实 CLI 正/反例 + 修复见 4.7.3）    |
 | P4   | **真实 pilot**：在本仓库用两个真实任务跑完整链路                         | 两个任务零互相干扰、各自出 verdict、按建议顺序合并、账本可复盘                | 待定（需授权）                                     |
 
 **风险与边界**
