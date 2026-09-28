@@ -168,6 +168,31 @@ describe('audit verdict contract', () => {
     expect(result.blockers).toContain('impl_a: no covering audit passed (audit_a)')
   })
 
+  it('blocks a rubber-stamp audit at the gate, where only the ledger is available', () => {
+    const result = computeMergeReadiness(
+      viewOf([
+        { ...IMPL_A, agent: 'claude', model: 'shared-model' },
+        { ...PASSING_AUDIT, agent: 'claude', model: 'shared-model' }
+      ]).folded
+    )
+    expect(result.ready).toBe(false)
+    expect(result.blockers.join('\n')).toContain('rubber stamp, not a review')
+  })
+
+  it('lets the same agent through when the ledger shows different models', () => {
+    const result = computeMergeReadiness(
+      viewOf([
+        { ...IMPL_A, agent: 'claude', model: 'writer' },
+        { ...PASSING_AUDIT, agent: 'claude', model: 'judge' }
+      ]).folded
+    )
+    expect(result.ready).toBe(true)
+  })
+
+  it('does not invent a conflict when the ledger never recorded an agent', () => {
+    expect(computeMergeReadiness(viewOf([IMPL_A, PASSING_AUDIT]).folded).ready).toBe(true)
+  })
+
   it('blocks a task that is not completed, even with a passing audit', () => {
     const result = computeMergeReadiness(
       viewOf([{ ...IMPL_A, state: 'dispatched' }, PASSING_AUDIT]).folded

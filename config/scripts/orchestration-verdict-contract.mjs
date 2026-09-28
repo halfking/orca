@@ -91,6 +91,36 @@ export function validateVerdicts(folded) {
 }
 
 /**
+ * Whether an audit is actually independent of the work it reviews.
+ *
+ * This catches the failure where the same system, on the same model, reviews its own change: the
+ * verdict still gets written, every field still looks valid, and the review has become a rubber
+ * stamp. A separate Dispatch and a separate worktree are not enough on their own — when the agent
+ * and the model are identical there is one judge, not two.
+ *
+ * Returns a message describing the problem, or null when the audit stands on its own. An unknown
+ * agent is not a conflict: there is nothing to compare against, and inventing a violation from
+ * missing data teaches operators to ignore this.
+ */
+export function auditIndependenceProblem(auditor, audited) {
+  if (!auditor?.agent || !audited?.agent) {
+    return null
+  }
+  if (auditor.agent !== audited.agent) {
+    return null
+  }
+  const auditorModel = auditor.model ?? null
+  if (auditorModel !== (audited.model ?? null)) {
+    return null
+  }
+  const shown = auditorModel ?? 'the agent default'
+  return (
+    `${auditor.id} audits ${audited.id} on the same agent and model (${auditor.agent}, ${shown}) — ` +
+    'that is a rubber stamp, not a review'
+  )
+}
+
+/**
  * Audits that did not pass, plus landable work nobody audited. Anything here blocks a merge.
  *
  * An audit covers the tasks it depends on, so coverage is read off the DAG rather than off naming:
@@ -130,6 +160,12 @@ export function computeMergeReadiness(folded) {
       blockers.push(
         `${task.id}: no covering audit passed (${covering.map((a) => a.id).join(', ')})`
       )
+    }
+    for (const auditor of covering) {
+      const problem = auditIndependenceProblem(auditor, task)
+      if (problem) {
+        blockers.push(problem)
+      }
     }
   }
 

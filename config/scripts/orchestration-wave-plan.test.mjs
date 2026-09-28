@@ -200,16 +200,70 @@ describe('plan validation', () => {
     const result = validatePlan(
       plan({
         confirmModels: true,
-        models: {
-          'strongest-code': 'model-a',
-          cheap: 'model-b',
-          'strongest-reasoning': 'model-c'
-        }
+        models: { 'strongest-code': 'model-a', cheap: 'model-b', 'strongest-reasoning': 'model-c' }
       })
     )
     expect(result.warnings.some((message) => message.includes('the agent default applies'))).toBe(
       false
     )
+  })
+
+  it('refuses a plan whose auditor is the same agent on the same model as the implementer', () => {
+    const result = validatePlan(
+      plan({
+        confirmModels: true,
+        models: { 'strongest-code': 'shared', cheap: 'cheap', 'strongest-reasoning': 'shared' },
+        tasks: [
+          { id: 'impl', role: 'implementer', spec: 's', writeSet: [], agent: 'claude' },
+          { id: 'audit', role: 'auditor', spec: 's', deps: ['impl'], agent: 'claude' }
+        ]
+      })
+    )
+    expect(allMessages(result).join('\n')).toContain('rubber stamp, not a review')
+  })
+
+  it('accepts the same agent when the audit runs a different model', () => {
+    const result = validatePlan(
+      plan({
+        confirmModels: true,
+        models: { 'strongest-code': 'writer', cheap: 'cheap', 'strongest-reasoning': 'judge' },
+        tasks: [
+          { id: 'impl', role: 'implementer', spec: 's', writeSet: [], agent: 'claude' },
+          { id: 'audit', role: 'auditor', spec: 's', deps: ['impl'], agent: 'claude' }
+        ]
+      })
+    )
+    expect(allMessages(result).join('\n')).not.toContain('rubber stamp')
+  })
+
+  it('accepts the same model on a different agent', () => {
+    const result = validatePlan(
+      plan({
+        confirmModels: true,
+        models: { 'strongest-code': 'shared', cheap: 'cheap', 'strongest-reasoning': 'shared' },
+        tasks: [
+          { id: 'impl', role: 'implementer', spec: 's', writeSet: [] },
+          { id: 'audit', role: 'auditor', spec: 's', deps: ['impl'] }
+        ]
+      })
+    )
+    expect(allMessages(result).join('\n')).not.toContain('rubber stamp')
+  })
+
+  it('flags an audit on the same agent with no model named, since both fall to the default', () => {
+    const result = validatePlan(
+      plan({
+        tasks: [
+          { id: 'impl', role: 'implementer', spec: 's', writeSet: [], agent: 'claude' },
+          { id: 'audit', role: 'auditor', spec: 's', deps: ['impl'], agent: 'claude' }
+        ]
+      })
+    )
+    expect(allMessages(result).join('\n')).toContain('the agent default')
+  })
+
+  it('survives a plan compiled before this rule existed: the default matrix is independent', () => {
+    expect(allMessages(validatePlan(plan())).join('\n')).not.toContain('rubber stamp')
   })
 })
 

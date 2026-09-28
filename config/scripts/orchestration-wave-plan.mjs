@@ -16,6 +16,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { resolveLaunch, roleSpec } from './orchestration-role-matrix.mjs'
+import { auditIndependenceProblem } from './orchestration-verdict-contract.mjs'
 
 const SELF_DIR = import.meta.dirname
 
@@ -218,6 +219,7 @@ export function validatePlan(plan) {
     agent: plan.defaultAgent ?? null,
     model: null
   }
+  const launches = new Map()
   for (const task of tasks) {
     try {
       const overrides = {
@@ -225,6 +227,7 @@ export function validatePlan(plan) {
         model: plan.confirmModels ? (plan.models?.[roleSpec(task.role)?.tier] ?? null) : null
       }
       const launch = resolveLaunch(task, overrides)
+      launches.set(task.id, launch)
       if (launch.tier && !launch.model) {
         warnings.push(
           `${task.id}: role needs the ${launch.tier} tier but no model is named, so the agent default applies`
@@ -232,6 +235,21 @@ export function validatePlan(plan) {
       }
     } catch (error) {
       errors.push(`${task.id}: ${error.message}`)
+    }
+  }
+
+  // An audit is only a second opinion if it is a second opinion. Separate worktrees and separate
+  // Dispatches are not enough when the agent and the model behind them are the same ones that wrote
+  // the change, so the plan is refused here rather than at the merge gate three waves later.
+  for (const auditor of tasks.filter((task) => task.role === 'auditor')) {
+    for (const dep of auditor.deps ?? []) {
+      const problem = auditIndependenceProblem(
+        { id: auditor.id, ...launches.get(auditor.id) },
+        { id: dep, ...launches.get(dep) }
+      )
+      if (problem) {
+        errors.push(problem)
+      }
     }
   }
 
