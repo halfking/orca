@@ -148,13 +148,14 @@ export const AGENT_PROVIDER_ENV: AgentProviderEnvMap = {
   },
   crush: {
     apiKeyEnvVar: 'OPENAI_API_KEY',
-    baseUrlEnvVar: 'OPENAI_BASE_URL',
-    notes: 'Charm/Crush (charm.sh/crush) reads standard OpenAI env vars.'
+    notes:
+      'Charm/Crush (charm.sh/crush): OPENAI_API_KEY is read (verified via crush README env-var table, 2026-09-29), but baseUrl is NOT a top-level OPENAI_BASE_URL — crush requires `provider add <id> --type openai-compat --base-url <url>` in `crushrc`. The table here drops baseUrlEnvVar to avoid a silent no-op.'
   },
   aug: {
     apiKeyEnvVar: 'OPENAI_API_KEY',
     baseUrlEnvVar: 'OPENAI_BASE_URL',
-    notes: 'Augment Auggie reads standard OpenAI env vars.'
+    notes:
+      'Augment Auggie (`auggie` CLI): auth is via `auggie login` (Augment backend), no documented override of the API base URL. OPENAI_* env vars are accepted by the underlying agent loop but not part of the public preset UX. Kept in the table with caveat; users may need to consult the Augment docs to wire a custom endpoint.'
   },
   cline: {
     apiKeyEnvVar: 'OPENAI_API_KEY',
@@ -177,9 +178,10 @@ export const AGENT_PROVIDER_ENV: AgentProviderEnvMap = {
     notes: 'Continue.dev reads standard OpenAI env vars.'
   },
   cursor: {
-    apiKeyEnvVar: 'OPENAI_API_KEY',
+    apiKeyEnvVar: 'CURSOR_API_KEY',
     baseUrlEnvVar: 'OPENAI_BASE_URL',
-    notes: 'Cursor reads standard OpenAI env vars for OpenAI-compatible providers.'
+    notes:
+      "Cursor-agent reads its own CURSOR_API_KEY (per `cursor-agent --help`: `--api-key ... (can also use CURSOR_API_KEY env var)`), NOT OpenAI's OPENAI_API_KEY. Verified by real-machine spawn 2026-09-29."
   },
   droid: {
     apiKeyEnvVar: 'FACTORY_API_KEY',
@@ -222,7 +224,8 @@ export const AGENT_PROVIDER_ENV: AgentProviderEnvMap = {
   trae: {
     apiKeyEnvVar: 'OPENAI_API_KEY',
     baseUrlEnvVar: 'OPENAI_BASE_URL',
-    notes: 'Trae (bytedance) reads standard OpenAI env vars.'
+    notes:
+      'Trae Agent (bytedance/trae-agent) reads OPENAI_API_KEY + OPENAI_BASE_URL (plus ANTHROPIC_*, GOOGLE_*, OPENROUTER_*, DOUBAO_*). Source: https://github.com/bytedance/trae-agent README "Environment Variables" section (verified 2026-09-29).'
   },
   ante: {
     apiKeyEnvVar: 'OPENAI_API_KEY',
