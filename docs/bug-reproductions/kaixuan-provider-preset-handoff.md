@@ -224,6 +224,11 @@ at `src/main/kaixuan-provider-preset-dotted-id-live.test.ts` covers what was ris
   still skipped by default; keep its skip semantics consistent with the new
   dotted-id live test.
 
+Both open risks were closed on `origin/main` as `081e538f4` (per-path probe on
+`/v1/chat/completions`, `/v1/responses`, `/v1/messages` for every catalog id,
+plus the local-gateway case rewritten to skip rather than throw when the dev
+box is off). The merge into this branch is `1a29d8cb0`.
+
 ## §6 — this round's task closures (aac9ceae9 follow-ups)
 
 Three independent follow-up items were closed on `feat/kaixuan-v4-i18n-renderer-handoff`,
@@ -276,8 +281,57 @@ their config arriving in `.jsonc` form.
   Finder bookkeeping files; this new `.gitignore` keeps them out of the
   commit graph.
 
-**No i18n changes in this round.** `kaixuanApiKeyDescription` value stays in
-its current English text; the renderer description in
+**No i18n changes in `aac9ceae9` itself.** `kaixuanApiKeyDescription` value
+stays in its long English text; the renderer description in
 `src/renderer/src/components/settings/accounts-pane-kaixuan-header.tsx` was
-*not* touched. Translation work, if any, is a separate P1 on a later round
-and was explicitly out of scope for `aac9ceae9`.
+*not* touched by `aac9ceae9`. Translation work is a separate P1.
+
+### T3 — i18n follow-up (`029dbb726`, on this branch)
+
+After the §6 record landed, a separate i18n commit (`029dbb726`) shortened the
+`kaixuanApiKeyDescription` value to a one-line security warning — the prior
+text spelled out which files / keys were touched and which agents were
+unaffected, which read as documentation, not a warning. The new text is
+"literal token is written in plain text; restrict file permissions or export
+the shell env var instead". Two files changed:
+
+- `src/renderer/src/i18n/locales/en.json` — English value shortened.
+- `src/renderer/src/components/settings/accounts-pane-kaixuan-header.tsx` —
+  the inline fallback string matched to keep the no-translation case in sync.
+
+The other five locales (`zh` / `ja` / `fr` / `ko` / `es`) still carry the
+long version. That is intentional in the short term (the description was
+considered English-only copy that translators can re-derive from the new
+English source) but it does mean a non-English reader sees a different
+description than an English reader. If that drift becomes a UX problem,
+either revert `029dbb726` or have the i18n pipeline re-translate from the
+shortened source. Out of scope for this branch.
+
+### T4 — reconcile with `origin/main` (`1a29d8cb0`, on this branch)
+
+`081e538f4` (per-API-path probe + local-gateway skip semantics) landed on
+`origin/main` after this branch was cut from `90e791f16`. The merge
+`1a29d8cb0` brings it in. Four files diverged between the branch tip and
+`origin/main`; the merge was clean because each side modified different line
+ranges:
+
+- `081e538f4` (origin/main): `.github/workflows/kaixuan-provider-preset-live.yml`
+  (filter widened from `every catalog entry exists on the kxpms gateway` to
+  `kxpms` to include the new per-path probes) +
+  `src/shared/provider-preset-model-catalog.live.test.ts` (per-path probes,
+  local-gateway skip semantics, documented cost / reachability tradeoffs).
+- This branch: `docs/bug-reproductions/kaixuan-provider-preset-handoff.md`
+  (this §6 record + i18n commit note) +
+  `src/renderer/src/i18n/locales/en.json` +
+  `src/renderer/src/components/settings/accounts-pane-kaixuan-header.tsx`.
+
+Tests run on the merged tree:
+
+- `src/shared/provider-preset-model-catalog.live.test.ts` (9 cases registered,
+  6 new from `081e538f4`) — all skipped without the live env var, as designed.
+- `src/main/codex src/main/opencode src/main/claude src/shared` —
+  13040 passed / 152 skipped / 1 expected fail, plus the two pre-existing
+  `claude-structured-real-cli.test.ts` failures that pre-date this work
+  (hand-off §3 / "Nine pre-existing test failures, not caused by this work").
+- `src/renderer/src/components/settings/accounts-pane` — 16/16 green; the
+  i18n change does not break the validation suite.
