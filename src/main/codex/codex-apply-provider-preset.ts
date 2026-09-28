@@ -39,16 +39,33 @@ function joinTomlBlocks(blocks: string[]): string {
   return blocks.filter((block) => block.length > 0).join('\n')
 }
 
-/** Render `[model_providers.<id>]` table content for the given provider. */
-function renderProviderTable(provider: ProviderPresetDefinition): string {
+/** Render `[model_providers.<id>]` table content for the given provider.
+ *
+ *  @param apiKey  when present, the caller's literal bearer token is written as
+ *                 `experimental_bearer_token` and `env_key` is OMITTED.
+ */
+function renderProviderTable(provider: ProviderPresetDefinition, apiKey?: string | null): string {
   const lines = [
     `[model_providers.${provider.modelProviderName}]`,
     `name = "${provider.codexProviderName}"`,
-    `base_url = "${provider.codexBaseUrl}"`,
-    `env_key = "${provider.envKeyName}"`,
-    `wire_api = "responses"`,
-    `requires_openai_auth = false`
+    `base_url = "${provider.codexBaseUrl}"`
   ]
+  if (typeof apiKey === 'string' && apiKey.length > 0) {
+    // Why the inline token replaces env_key instead of joining it: codex resolves
+    // `env_key` FIRST and hard-fails before it ever looks at
+    // `experimental_bearer_token`. Verified against codex-cli 0.158.0 on
+    // 2026-09-28 against the live gateway: a table carrying both fields aborts
+    // with "ERROR: Missing environment variable: `OPENAI_API_KEY`", while the
+    // same table with only `experimental_bearer_token` completes the call. The
+    // two are mutually exclusive in practice, so emitting both silently
+    // discards the key the user just typed in.
+    lines.push(`experimental_bearer_token = "${escapeTomlBasicString(apiKey)}"`)
+  } else {
+    // No inline token: fall back to the env-var indirection, which only resolves
+    // when the shell that spawns the codex worker exports it.
+    lines.push(`env_key = "${provider.envKeyName}"`)
+  }
+  lines.push('wire_api = "responses"', 'requires_openai_auth = false')
   return lines.join('\n')
 }
 
@@ -136,13 +153,14 @@ function stripRegistryArtifacts(config: string, knownIds: ReadonlySet<string>): 
 export function renderCodexConfigForProvider(
   currentConfig: string,
   provider: ProviderPresetDefinition | null,
-  knownIds: ReadonlySet<string>
+  knownIds: ReadonlySet<string>,
+  apiKey?: string | null
 ): string {
   const cleaned = stripRegistryArtifacts(currentConfig, knownIds)
   if (provider === null) {
     return joinPreservingTrailingNewline(cleaned.split('\n'), cleaned.includes('\r\n'))
   }
-  const tableBlock = renderProviderTable(provider)
+  const tableBlock = renderProviderTable(provider, apiKey)
   const withTopLevel = `${cleaned.replace(/(\r?\n)*$/, '')}\nmodel_provider = "${provider.modelProviderName}"\n`
   return joinPreservingTrailingNewline(
     `${withTopLevel}\n${tableBlock}\n`.split('\n'),
@@ -197,7 +215,11 @@ export function applyCodexProvider(
     } catch {
       current = ''
     }
-    const next = renderCodexConfigForProvider(current, provider, knownIds)
+    // The token is rendered by renderProviderTable rather than patched in
+    // afterwards, so `env_key` and `experimental_bearer_token` are never emitted
+    // together — codex resolves env_key first and aborts on the missing variable
+    // before it can use the inline token (see renderProviderTable).
+    const next = renderCodexConfigForProvider(current, provider, knownIds, options?.apiKey ?? null)
     if (current === next) {
       return {
         agentId: 'codex',
@@ -206,20 +228,7 @@ export function applyCodexProvider(
         error: null
       }
     }
-    // apiKey plumbing: when the caller supplied an explicit token, embed it as
-    // `experimental_bearer_token` — the Codex-documented field for a direct
-    // bearer token. The previous shape wrote `api_key = "..."`, which is NOT a
-    // field in the Codex `[model_providers.<id>]` schema at all, so the token was
-    // silently dropped and codex fell back to env_key alone (see Codex
-    // "Configuration Reference — model_providers.<id>").
-    const withEnvOverride =
-      options?.apiKey && provider !== null
-        ? next.replace(
-            new RegExp(`(env_key = "${escapeRegex(provider.envKeyName)}")`),
-            `$1\nexperimental_bearer_token = "${escapeTomlBasicString(options.apiKey)}"`
-          )
-        : next
-    writeFileSync(configPath, withEnvOverride, 'utf-8')
+    writeFileSync(configPath, next, 'utf-8')
     return {
       agentId: 'codex',
       configPath,

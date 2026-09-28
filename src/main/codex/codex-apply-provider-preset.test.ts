@@ -168,6 +168,24 @@ describe('codex-apply-provider-preset', () => {
     expect(written).toContain('experimental_bearer_token = "sk-a\\"b\\\\c"')
   })
 
+  it('never emits env_key alongside an inline token (codex aborts on the missing var)', () => {
+    // Why: verified against codex-cli 0.158.0 on 2026-09-28 against the live
+    // gateway. A table with BOTH fields aborts with
+    // "ERROR: Missing environment variable: `OPENAI_API_KEY`" — codex resolves
+    // env_key first and never reaches experimental_bearer_token. Emitting both
+    // therefore silently discards the key the user just typed in.
+    applyCodexKaixuanPreset('kaixuan-kxpms', { apiKey: 'sk-test-token' })
+    const withKey = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
+    expect(withKey).toContain('experimental_bearer_token = "sk-test-token"')
+    expect(withKey).not.toContain('env_key')
+
+    // With no inline token, env_key is the only auth path and must be present.
+    applyCodexKaixuanPreset('kaixuan-kxpms')
+    const withoutKey = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
+    expect(withoutKey).toContain('env_key = "OPENAI_API_KEY"')
+    expect(withoutKey).not.toContain('experimental_bearer_token')
+  })
+
   // --- v4: custom provider registry ---
 
   it('applyCodexProvider writes a custom provider table without disturbing built-ins', () => {

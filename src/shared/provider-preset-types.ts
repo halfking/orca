@@ -66,7 +66,17 @@ export type ProviderPresetDefinition = {
   opencodeModelIds: readonly string[]
 }
 
-/** 两个 preset 共用的 model 目录。取自用户已在生产验证的 kaixuan 模型清单。 */
+/**
+ * 两个 preset 共用的 model 目录。
+ *
+ * 每一项都对照两个网关的实时 `/v1/models` 核对过（2026-09-28）：
+ * kxpms 返回 601 个 model，local 返回 668 个，下表 10 项在两边都存在。
+ * 上游的 minimax 线是 `minimax-m2.7-highspeed` 之类的命名，不存在
+ * `minimax-m2.7-quickspeed` —— 早先的清单里那一项是从别处抄来的，
+ * 在两边都 404，会让 opencode 列出一个点进去就报错的 model。
+ * 新增条目前请先跑 `src/shared/provider-preset-model-catalog.live.test.ts`
+ * （默认 skip，用 ORCA_LIVE_GATEWAY_TESTS=1 显式开启）复核。
+ */
 const KAIXUAN_MODEL_IDS: readonly string[] = [
   'claude-opus-4-8',
   'claude-sonnet-4-6',
@@ -77,7 +87,6 @@ const KAIXUAN_MODEL_IDS: readonly string[] = [
   'mimo-v2.5',
   'mimo-v2.5-pro',
   'minimax-m2.7',
-  'minimax-m2.7-quickspeed',
   'minimax-m3'
 ]
 
