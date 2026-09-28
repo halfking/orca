@@ -73,8 +73,15 @@ jobs:
           ORCA_LIVE_GATEWAY_TESTS: '1'
           ORCA_KAIXUAN_KEY: ${{ secrets.KAIXUAN_GATEWAY_KEY }}
         run: |
-          # `-t kxpms` selects the test whose name matches the kxpms check; the
-          # local-gateway case is intentionally excluded because the runner cannot
-          # reach 127.0.0.1:8782.
+          # `-t kxpms` selects every test whose name mentions kxpms. Today that
+          # is the existing /v1/models existence check plus the three round-5
+          # per-API-path probes (/v1/chat/completions, /v1/responses,
+          # /v1/messages). The local-gateway case is intentionally excluded
+          # because the runner cannot reach 127.0.0.1:8782; the local cases
+          # stay in the file for the manual dev-box audit pass.
+          #
+          # Cost note: 4 kxpms tests × ~10 ids each at ~500 ms = ~20 s of
+          # probe time on top of the install step; well inside the 5-minute
+          # job timeout.
           pnpm exec vitest run --config config/vitest.config.ts \
-            src/shared/provider-preset-model-catalog.live.test.ts -t 'every catalog entry exists on the kxpms gateway'
+            src/shared/provider-preset-model-catalog.live.test.ts -t 'kxpms'
