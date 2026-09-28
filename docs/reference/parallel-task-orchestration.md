@@ -278,10 +278,12 @@ node config/scripts/orchestration-schedule-ledger.mjs view --ledger <path> --jso
 设计约束（都是踩过的坑）：
 
 - **账本是 append-only JSONL**，默认落在 `<cwd>/.orca/orchestration-ledger/<run>.jsonl`；只消费 `orca ... --json` 收据，不改运行时。
+- **它是所有 worker 共享的唯一文件，所以并发写入必须安全**。这一点是被实测过的，不是假设：25 个并发写入者、单行最大约 6.3KB，零撕裂、零丢写。支撑它的是 POSIX 下 `O_APPEND` 单次 `write()` 的原子性——注意这条不适用于管道（`PIPE_BUF` 规则），所以实现里不能用"拼起来再写"的读改写。
+- **测试必须有鉴别力**：把 `appendEntry` 换成读改写后，同样的测试会失败（8 进程 × 20KB 开始丢写，16 × 50KB 出现撕裂行）。参数是照着这个对照标定的，不是拍脑袋定的——太弱的测试对着写坏的实现也会全绿。深度压测用 `config/scripts/orchestration-ledger-concurrency-stress.mjs`。
 - **波次由 DAG 推导，不采信记录值**——`wave = 1 + max(dep.wave)`，避免手写 wave 与真实依赖漂移。
 - **未知即阻断**：依赖未出现在账本里按"未满足"处理，fail closed。
 - **合并队列只收可落地任务**：`coordinator` / `auditor` / `merger` 不进入合并顺序；**写集未记录的可落地任务排最后**——未知不等于小。
-- 覆盖测试见 `config/scripts/orchestration-schedule-ledger.test.mjs`（17 例，覆盖解析失败、折叠、DAG 波次、门禁、写集矩阵、合并顺序、渲染）。
+- 覆盖测试见 `config/scripts/orchestration-schedule-ledger.test.mjs`（19 例，覆盖解析失败、折叠、DAG 波次、门禁、写集矩阵、合并顺序、渲染，以及跨进程并发写入）。
 
 #### 4.7.2 已实现：`config/scripts/orchestration-role-matrix.mjs` + `orchestration-wave-plan.mjs`
 
