@@ -180,6 +180,16 @@ export function computeMergeReadiness(folded) {
   const auditors = folded.tasks.filter((task) => task.role === 'auditor')
   const blockers = []
 
+  // Why an empty ledger is not a pass: this verdict answers "may this land", and a ledger with no
+  // task in it has audited nothing, landed nothing and proven nothing. Found live during P4 —
+  // `verify --ledger <empty file>` and `--ledger <file that does not exist>` both printed
+  // MERGE GATE: OPEN and exited 0, which is a gate reporting success on the absence of evidence.
+  if (folded.tasks.length === 0) {
+    blockers.push(
+      'ledger records no task: nothing was audited and nothing landed, so there is nothing to clear'
+    )
+  }
+
   for (const row of rows) {
     if (row.problems.length > 0) {
       blockers.push(`${row.id}: ${row.problems.join('; ')}`)

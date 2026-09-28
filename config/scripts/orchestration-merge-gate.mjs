@@ -16,6 +16,7 @@
 //   orchestration-merge-gate.mjs merge  --ledger <path> --repo <path> --base <ref> [--execute] [--json]
 
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import {
@@ -378,6 +379,13 @@ function main() {
   }
 
   const ledgerPath = resolve(args.ledger)
+  // A missing file and an empty file both fold to "no tasks", and both used to read as a pass.
+  // Saying which one it was costs nothing and stops a typo'd --ledger from looking like approval.
+  if (!existsSync(ledgerPath)) {
+    process.stderr.write(`no such ledger: ${ledgerPath}\n`)
+    process.exitCode = 1
+    return
+  }
   const view = buildView(readLedger(ledgerPath))
 
   if (command === 'verify') {
