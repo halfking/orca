@@ -64,6 +64,27 @@ entirely, which is correct but not usable.
 Note the first row: the landing branch is `halfking/impl_a-2`, not `halfking/impl_a`. The `-2` is
 why a name-guessing fix would also be wrong — the ledger has to record the real ref.
 
+## The cheap alternative, measured and rejected
+
+Before adding a field, the obvious cheaper fix is to let the repository answer: for each task, find
+branches that carry write-set commits the fork base does not have. That needs no schema change and
+no settle helper. Measured against this run (`.p4-evidence/resolve-branch-from-repo.mjs`):
+
+| variant                                          | result                                                                |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| strict: branch forked exactly at the base tip     | 1/4 resolved, three silent misses — the base moves on after dispatch, so a correct branch stops equalling the tip |
+| relaxed: drop the fork check, keep the write set  | 3/4 ambiguous, and the one unique hit is **wrong** — `test_b` resolves to `feat/orchestration-schedule-ledger` |
+
+The second row is the reason this alternative is rejected rather than preferred. **An
+inference-based fix does not fail loudly where it is unsure — it returns a confident wrong
+answer.** A wrong branch merges cleanly and quietly, which is strictly worse than today's honest
+state (a gate reading a field that means the wrong thing, and printing that field in its plan
+where a reader can see it).
+
+So the ledger must carry the landing branch, and the branch-setter must record it: the repository
+cannot recover it afterwards, and least of all once a branch is reset onto its parent, where
+nothing on disk distinguishes the two.
+
 ## Blast radius: the gate tool only
 
 The compiled wave plan is not affected. For the merge task the compiler emits `gate-create` — a
