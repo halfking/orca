@@ -1,0 +1,30 @@
+{
+  "id": "02199b2b-8ba4-4086-9342-e0e6440b5e77",
+  "ok": true,
+  "result": {
+    "task": {
+      "id": "task_d4b0fc285403",
+      "run_id": "run_77a4e887f8d8",
+      "parent_id": null,
+      "created_by_terminal_handle": "term_30379b7c-b7a4-4d7a-8ffe-3889c6eed754",
+      "created_by_pane_key": "bd6cb886-147b-4b98-8fbc-4b9a813c0025:c4ddcad9-dcc1-4d71-994c-4c364ff205d9",
+      "created_by_process_incarnation": "b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/workspace/ai/orca-wt-orca2@@8452b2c2:1cacf408-31de-4244-adae-b53f7f95de3a",
+      "created_by_run_generation": 2,
+      "task_title": "wave barriers between waves",
+      "display_name": "wave barriers between waves",
+      "spec": "Target: config/scripts/orchestration-wave-plan.mjs (the compiled step list and renderShell).\nChange: the emitted script dispatches every wave back to back with no wait, so a real run starts wave-2 test workers while wave-1 implementations are still running. Emit one barrier step per non-final wave that waits for the previous wave to settle (orca orchestration check --wait --types \"worker_done,escalation,question\" --timeout-ms <n> --json), record it in the ledger as its own event so the schedule view shows where the run paused, and make the emitted script stop when a barrier returns a non-ok result instead of marching into the next wave.\nConstraints: the existing argv for task-create / worker-start / gate-create must not change; run-create stays the only step above wave 0; barriers must not appear after the final wave; the stub-based orchestration-generated-script-check.mjs must still pass, so the stub has to answer the new command.\nWrite set: config/scripts/orchestration-wave-plan.mjs, config/scripts/orchestration-generated-script-check.mjs (stub branch only, if the new argv needs an answer).\nAcceptance: node config/scripts/orchestration-generated-script-check.mjs exits 0, and the script it generates contains exactly one orchestration check --wait per non-final wave and none after the last wave.",
+      "status": "ready",
+      "deps": "[]",
+      "result": null,
+      "created_at": "2026-09-28 16:59:42",
+      "completed_at": null
+    },
+    "mutation": {
+      "requestId": "cfb5b4b6-ed7f-4f01-aa57-c70c44f9e96e",
+      "replayed": false
+    }
+  },
+  "_meta": {
+    "runtimeId": "aaa2ae16-1d9b-4a4b-9253-044038a99fe2"
+  }
+}

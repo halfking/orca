@@ -1,0 +1,119 @@
+{
+  "id": "0015d807-5a91-460b-a9c8-1f3644477a89",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/orca/workspaces/orca-wt-orca2/pilot-impl-a-3",
+      "identity": {
+        "key": "wt2:local:dcc7ce31-2c02-4104-94e4-4654d857e014",
+        "executionHostId": "local",
+        "instanceId": "dcc7ce31-2c02-4104-94e4-4654d857e014"
+      },
+      "instanceId": "dcc7ce31-2c02-4104-94e4-4654d857e014",
+      "repoId": "b7318008-3185-41d4-8f51-07c3e09ec492",
+      "projectId": "github:stablyai/orca",
+      "hostId": "local",
+      "projectHostSetupId": "b7318008-3185-41d4-8f51-07c3e09ec492",
+      "creatorProvenance": {
+        "kind": "host"
+      },
+      "path": "/Users/xutaohuang/orca/workspaces/orca-wt-orca2/pilot-impl-a-3",
+      "head": "3b1ca131219a35ad3b87f9c59324e9cc79425617",
+      "branch": "refs/heads/pilot-impl-a-3",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "pilot-impl-a",
+      "displayNameMode": "fixed",
+      "comment": "",
+      "linkedIssue": null,
+      "linkedPR": null,
+      "linkedLinearIssue": null,
+      "linkedLinearIssueWorkspaceId": null,
+      "linkedLinearIssueOrganizationUrlKey": null,
+      "linkedGitLabMR": null,
+      "linkedGitLabIssue": null,
+      "linkedBitbucketPR": null,
+      "linkedAzureDevOpsPR": null,
+      "linkedGiteaPR": null,
+      "linkedWorkItem": null,
+      "linkedTaskSourceContext": null,
+      "isArchived": false,
+      "isUnread": false,
+      "isPinned": false,
+      "sortOrder": 1790614642188,
+      "lastActivityAt": 1790614642187,
+      "createdAt": 1790614642187,
+      "cliProvenance": {
+        "kind": "created-by-cli",
+        "createdAt": 1790614633573
+      },
+      "baseRef": "pilot/p4-two-task-pilot",
+      "workspaceStatus": "in-progress",
+      "parentWorktreeId": "b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/workspace/ai/orca-wt-orca2",
+      "childWorktreeIds": [],
+      "lineage": {
+        "worktreeId": "b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/orca/workspaces/orca-wt-orca2/pilot-impl-a-3",
+        "worktreeInstanceId": "dcc7ce31-2c02-4104-94e4-4654d857e014",
+        "parentWorktreeId": "b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/workspace/ai/orca-wt-orca2",
+        "parentWorktreeInstanceId": "368ef9a5-8397-4150-aaa8-72fc60113a62",
+        "origin": "cli",
+        "capture": {
+          "source": "cwd-context",
+          "confidence": "inferred"
+        },
+        "createdAt": 1790614642188
+      },
+      "workspaceLineage": {
+        "childWorkspaceKey": "worktree:b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/orca/workspaces/orca-wt-orca2/pilot-impl-a-3",
+        "childInstanceId": "dcc7ce31-2c02-4104-94e4-4654d857e014",
+        "parentWorkspaceKey": "worktree:b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/workspace/ai/orca-wt-orca2",
+        "parentInstanceId": "368ef9a5-8397-4150-aaa8-72fc60113a62",
+        "origin": "cli",
+        "capture": {
+          "source": "cwd-context",
+          "confidence": "inferred"
+        },
+        "createdAt": 1790614642188
+      },
+      "git": {
+        "path": "/Users/xutaohuang/orca/workspaces/orca-wt-orca2/pilot-impl-a-3",
+        "head": "3b1ca131219a35ad3b87f9c59324e9cc79425617",
+        "branch": "refs/heads/pilot-impl-a-3",
+        "isBare": false,
+        "isMainWorktree": false
+      }
+    },
+    "lineage": {
+      "worktreeId": "b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/orca/workspaces/orca-wt-orca2/pilot-impl-a-3",
+      "worktreeInstanceId": "dcc7ce31-2c02-4104-94e4-4654d857e014",
+      "parentWorktreeId": "b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/workspace/ai/orca-wt-orca2",
+      "parentWorktreeInstanceId": "368ef9a5-8397-4150-aaa8-72fc60113a62",
+      "origin": "cli",
+      "capture": {
+        "source": "cwd-context",
+        "confidence": "inferred"
+      },
+      "createdAt": 1790614642188
+    },
+    "workspaceLineage": {
+      "childWorkspaceKey": "worktree:b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/orca/workspaces/orca-wt-orca2/pilot-impl-a-3",
+      "childInstanceId": "dcc7ce31-2c02-4104-94e4-4654d857e014",
+      "parentWorkspaceKey": "worktree:b7318008-3185-41d4-8f51-07c3e09ec492::/Users/xutaohuang/workspace/ai/orca-wt-orca2",
+      "parentInstanceId": "368ef9a5-8397-4150-aaa8-72fc60113a62",
+      "origin": "cli",
+      "capture": {
+        "source": "cwd-context",
+        "confidence": "inferred"
+      },
+      "createdAt": 1790614642188
+    },
+    "warnings": [],
+    "catalogVersion": {
+      "epoch": "0888400e-6531-4c73-a452-230b9c339759",
+      "sequence": 13
+    }
+  },
+  "_meta": {
+    "runtimeId": "aaa2ae16-1d9b-4a4b-9253-044038a99fe2"
+  }
+}

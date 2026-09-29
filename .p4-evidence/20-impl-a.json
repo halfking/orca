@@ -1,0 +1,11 @@
+{
+  "id": "eb0e8ea9-0da6-401b-bea9-427b8ab0144d",
+  "ok": false,
+  "error": {
+    "code": "selector_ambiguous",
+    "message": "selector_ambiguous"
+  },
+  "_meta": {
+    "runtimeId": "aaa2ae16-1d9b-4a4b-9253-044038a99fe2"
+  }
+}

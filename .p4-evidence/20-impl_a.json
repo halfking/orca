@@ -1,0 +1,34 @@
+{
+  "id": "f6560cf7-4d88-4036-a67f-de14e2b4f4d3",
+  "ok": false,
+  "error": {
+    "code": "task_not_startable",
+    "message": "Task task_d4b0fc285403 is failed; only a ready Task can start. Orchestration mutation request ID: f1ed1d61-cd71-4d07-969b-9efe095d31f7.",
+    "data": {
+      "taskId": "task_d4b0fc285403",
+      "status": "failed",
+      "unmetDependencies": [],
+      "nextSteps": [
+        "A failed Task cannot be dispatched; create a new Task or use worker-start --retry-of for a failed attempt."
+      ],
+      "orchestrationRequestId": "f1ed1d61-cd71-4d07-969b-9efe095d31f7",
+      "originalCommand": [
+        "orca",
+        "orchestration",
+        "worker-start",
+        "--task",
+        "task_d4b0fc285403",
+        "--worktree",
+        "path:/Users/xutaohuang/orca/workspaces/orca-wt-orca2/pilot-impl-a",
+        "--agent",
+        "claude",
+        "--from",
+        "term_30379b7c-b7a4-4d7a-8ffe-3889c6eed754",
+        "--json"
+      ]
+    }
+  },
+  "_meta": {
+    "runtimeId": "aaa2ae16-1d9b-4a4b-9253-044038a99fe2"
+  }
+}

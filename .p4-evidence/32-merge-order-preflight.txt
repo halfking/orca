@@ -1,0 +1,25 @@
+P4 merge-order pre-flight, 2026-09-29 22:49:59
+base: origin/main = 102deffa7  (docs(orchestration): the second pilot round found four claims that were false)
+
+NOTE: a first attempt used the LOCAL main ref (5441ce7c4). That ref is checked out
+      in another session's worktree (orca-wt-ledger) and does NOT contain this
+      project's five pushed commits — that run proved nothing and was discarded.
+      Everything below is on origin/main.
+
+--- gate-suggested order, merged for real in a throwaway worktree ---
+  halfking/impl_a-2: clean -> a0e68e953
+  halfking/test_a: clean -> 23fe848ab
+  halfking/impl_b: clean -> 8a5a6fd9a
+  halfking/test_b: clean -> 8a5a6fd9a
+
+--- merged result checks (post-merge tree) ---
+  vitest orchestration:
+     Test Files  4 passed (4)
+          Tests  81 passed (81)
+  oxlint config/scripts/ (silence = clean):
+  verify:orchestration-generated-script:
+    
+    PASS
+  verify:orchestration-argv-contract:
+    schema: 9/9 emitted command lines use only flags the binary declares
+    probe: skipped. Pass --live to hand the command lines to a running Orca; note that a live

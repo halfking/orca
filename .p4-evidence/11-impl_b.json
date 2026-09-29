@@ -1,0 +1,30 @@
+{
+  "id": "b0a2fb70-3bb0-426a-bd2b-d2663b1fe2d1",
+  "ok": true,
+  "result": {
+    "task": {
+      "id": "task_c8212d146d03",
+      "run_id": "run_77a4e887f8d8",
+      "parent_id": null,
+      "created_by_terminal_handle": "term_fde58210-e163-49e6-966b-af0a3f7012e7",
+      "created_by_pane_key": "6f94a184-c512-484e-bc0d-3a069f2c8ef9:18b41d26-85c5-4b5e-8c95-67971e88b141",
+      "created_by_process_incarnation": "982d95a2-90ff-4fb3-872c-90f52e213611::/Users/xutaohuang/orca/workspaces/llm-gateway-go-5/llm-gateway-go-5@@b8b71e25:ff99789c-3c21-4797-b8ff-1e1c1a8dc6fe",
+      "created_by_run_generation": 1,
+      "task_title": "record what the merge actually did",
+      "display_name": "record what the merge actually did",
+      "spec": "Target: config/scripts/orchestration-merge-gate.mjs (the merge command).\nChange: after a run is merged, the schedule ledger still holds only dispatches and verdicts — nothing says which branch landed, onto which base, in which order, with which commits. That is exactly the record a post-mortem needs, so `merge --execute` must append one append-only entry per merged branch carrying branch, base, resulting commit and merge order, and the gate must expose those entries through the same view command that reads the ledger.\nConstraints: the existing verify / merge / record-done behaviour must not change; a merge that aborts on conflict must not append an entry claiming success (append an explicit aborted entry instead, naming the conflicting branch); append-only — never rewrite an existing line; the flag must be explicit, so a plain `merge --execute` without it keeps today's behaviour.\nWrite set: config/scripts/orchestration-merge-gate.mjs, config/scripts/orchestration-schedule-ledger.mjs (only if the view cannot already read an unknown event type).\nAcceptance: on a real temporary git repository, a `merge --execute --record-to <ledger>` appends one readable entry per merged branch, and the conflict path appends an aborted entry instead of a success; `node --test config/scripts/orchestration-merge-gate.test.mjs` stays green.",
+      "status": "ready",
+      "deps": "[]",
+      "result": null,
+      "created_at": "2026-09-28 16:55:25",
+      "completed_at": null
+    },
+    "mutation": {
+      "requestId": "a0867fef-0249-4629-afcc-6baf0d055e35",
+      "replayed": false
+    }
+  },
+  "_meta": {
+    "runtimeId": "aaa2ae16-1d9b-4a4b-9253-044038a99fe2"
+  }
+}

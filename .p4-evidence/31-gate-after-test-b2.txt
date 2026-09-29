@@ -1,0 +1,9 @@
+AUDIT VERDICTS
+  (no audit recorded)
+
+MERGE GATE: CLOSED
+  blocked by impl_a: landed without an audit verdict
+  blocked by impl_b: landed without an audit verdict
+  blocked by test_a: landed without an audit verdict
+  blocked by test_b: landed without an audit verdict
+exit=1

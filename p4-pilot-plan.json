@@ -1,0 +1,101 @@
+{
+  "objective": "P4 real pilot: two independent tasks through the full five-wave chain in a live Orca run — implement in parallel, test, independent audit, gated merge — with a ledger that can be replayed afterwards.",
+  "base": "pilot/p4-two-task-pilot",
+  "confirmModels": false,
+  "models": {
+    "strongest-code": null,
+    "cheap": null,
+    "strongest-reasoning": null
+  },
+  "tasks": [
+    {
+      "id": "impl_a",
+      "role": "implementer",
+      "agent": "opencode",
+      "title": "wave barriers between waves",
+      "spec": "Target: config/scripts/orchestration-wave-plan.mjs (the compiled step list and renderShell).\nChange: the emitted script dispatches every wave back to back with no wait, so a real run starts wave-2 test workers while wave-1 implementations are still running. Emit one barrier step per non-final wave that waits for the previous wave to settle (orca orchestration check --wait --types \"worker_done,escalation,question\" --timeout-ms <n> --json), record it in the ledger as its own event so the schedule view shows where the run paused, and make the emitted script stop when a barrier returns a non-ok result instead of marching into the next wave.\nConstraints: the existing argv for task-create / worker-start / gate-create must not change; run-create stays the only step above wave 0; barriers must not appear after the final wave; the stub-based orchestration-generated-script-check.mjs must still pass, so the stub has to answer the new command.\nWrite set: config/scripts/orchestration-wave-plan.mjs, config/scripts/orchestration-generated-script-check.mjs (stub branch only, if the new argv needs an answer).\nAcceptance: node config/scripts/orchestration-generated-script-check.mjs exits 0, and the script it generates contains exactly one orchestration check --wait per non-final wave and none after the last wave.",
+      "writeSet": [
+        "config/scripts/orchestration-wave-plan.mjs",
+        "config/scripts/orchestration-generated-script-check.mjs"
+      ],
+      "deps": []
+    },
+    {
+      "id": "impl_b",
+      "role": "implementer",
+      "agent": "opencode",
+      "title": "record what the merge actually did",
+      "spec": "Target: config/scripts/orchestration-merge-gate.mjs (the merge command).\nChange: after a run is merged, the schedule ledger still holds only dispatches and verdicts — nothing says which branch landed, onto which base, in which order, with which commits. That is exactly the record a post-mortem needs, so `merge --execute` must append one append-only entry per merged branch carrying branch, base, resulting commit and merge order, and the gate must expose those entries through the same view command that reads the ledger.\nConstraints: the existing verify / merge / record-done behaviour must not change; a merge that aborts on conflict must not append an entry claiming success (append an explicit aborted entry instead, naming the conflicting branch); append-only — never rewrite an existing line; the flag must be explicit, so a plain `merge --execute` without it keeps today's behaviour.\nWrite set: config/scripts/orchestration-merge-gate.mjs, config/scripts/orchestration-schedule-ledger.mjs (only if the view cannot already read an unknown event type).\nAcceptance: on a real temporary git repository, a `merge --execute --record-to <ledger>` appends one readable entry per merged branch, and the conflict path appends an aborted entry instead of a success; `node --test config/scripts/orchestration-merge-gate.test.mjs` stays green.",
+      "writeSet": [
+        "config/scripts/orchestration-merge-gate.mjs",
+        "config/scripts/orchestration-schedule-ledger.mjs"
+      ],
+      "deps": []
+    },
+    {
+      "id": "test_a",
+      "role": "test-author",
+      "agent": "opencode",
+      "title": "tests for wave barriers",
+      "spec": "Target: config/scripts/orchestration-wave-plan.test.mjs.\nChange: failing tests first, then keep them passing. Cover: exactly one barrier per non-final wave, no barrier after the final wave, barrier recorded in the ledger entry of its wave, and a plan whose barrier check returns non-ok makes the emitted script stop instead of continuing.\nConstraints: tests only — never edit config/scripts/orchestration-wave-plan.mjs to make a test pass; if the implementation cannot satisfy a test, report it as a finding instead of weakening the assertion.\nWrite set: config/scripts/orchestration-wave-plan.test.mjs.\nAcceptance: node --test config/scripts/orchestration-wave-plan.test.mjs passes, and you have watched the new cases fail against the pre-change implementation (red before green).",
+      "writeSet": [
+        "config/scripts/orchestration-wave-plan.test.mjs"
+      ],
+      "deps": [
+        "impl_a"
+      ],
+      "base": "halfking/impl_a-2"
+    },
+    {
+      "id": "test_b",
+      "role": "test-author",
+      "agent": "opencode",
+      "title": "tests for the merge record",
+      "spec": "Target: config/scripts/orchestration-merge-gate.test.mjs.\nChange: failing tests first, then keep them passing. Cover on real temporary git repositories: the recorded entry carries branch, base, resulting commit and order; the conflict path records an aborted entry and never a success; a run without --record-to appends nothing; the view surfaces the recorded entries.\nConstraints: tests only — never edit config/scripts/orchestration-merge-gate.mjs to make a test pass; report an unsatisfiable expectation as a finding instead of relaxing it; keep this file on the repository's own test runner — it is a vitest file (it imports describe/it/expect from 'vitest') and the project runs it through config/vitest.config.ts. Do not rewrite it to node:test, do not swap the vitest imports, and do not delete cases to make a count match: an earlier attempt at this task did all three, and the result was a file that passed under `node --test` while the project runner reported 'No test files found' and every one of the pre-existing cases had silently vanished.\nWrite set: config/scripts/orchestration-merge-gate.test.mjs.\nAcceptance: npx vitest run --config config/vitest.config.ts config/scripts/orchestration-merge-gate.test.mjs exits 0, reports the full case count for this file (the pre-change baseline is 37 passing), and you watched the new cases fail against the pre-change implementation (red before green).",
+      "writeSet": [
+        "config/scripts/orchestration-merge-gate.test.mjs"
+      ],
+      "deps": [
+        "impl_b"
+      ],
+      "base": "halfking/impl_b"
+    },
+    {
+      "id": "audit_a",
+      "role": "auditor",
+      "agent": "cursor",
+      "base": "halfking/impl_a-2",
+      "title": "audit wave barriers",
+      "spec": "Read-only review of the wave-barrier change on branch pilot/impl_a, judged against impl_a and its tests.\nVerdict: pass | pass_with_findings | fail, machine readable, not prose.\nEvery finding: file:line, severity, reproducible evidence.\nRegression: the exact commands you ran and their real output.\nDo not modify any file, including the implementation and the tests. A defect becomes a finding, not a patch.",
+      "deps": [
+        "impl_a",
+        "test_a"
+      ]
+    },
+    {
+      "id": "audit_b",
+      "role": "auditor",
+      "agent": "cursor",
+      "base": "halfking/impl_b",
+      "title": "audit the merge record",
+      "spec": "Read-only review of the merge-record change on branch pilot/impl_b, judged against impl_b and its tests.\nVerdict: pass | pass_with_findings | fail, machine readable, not prose.\nEvery finding: file:line, severity, reproducible evidence.\nRegression: the exact commands you ran and their real output.\nDo not modify any file, including the implementation and the tests. A defect becomes a finding, not a patch.",
+      "deps": [
+        "impl_b",
+        "test_b"
+      ]
+    },
+    {
+      "id": "merge",
+      "role": "merger",
+      "title": "merge wave",
+      "spec": "Once both audits are recorded and the gate is resolved, merge the two pilot branches in the order the ledger suggests (least write-set overlap first), then run the affected tests after each merge and the full orchestration test set at the end. Record what landed, in which order, with which commits.",
+      "deps": [
+        "audit_a",
+        "audit_b"
+      ]
+    }
+  ],
+  "_pilot_notes": {
+    "audit_agent_change": "The audit agent was changed from claude to cursor mid-run. claude is unusable on this machine (cc-switch has no claude provider with a base_url, so the proxy answers 400); every alternative model behind opencode was measured dead (apiclaude/apigpt insufficient balance, opencode-go subscription required, glm-5.2 token expired), and kaixuan/minimax-m3 is the model the implementers used, so it cannot be the auditor. cursor is a genuinely different agent, which is the independence the merge gate is built to require. Recorded rather than silently swapped: the plan is the SSOT for what was dispatched, and the plan is what the user read."
+  }
+}
