@@ -469,13 +469,14 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 
 #### 4.7.9 P4 第三轮：拒绝一次交付，牵出三条"状态不是它自称的那种状态"
 
-第二轮留下的 test_b 是 `failed`，而 wave 2 的审计按依赖排在它后面。要重派它，先得回答"failed 到底意味着什么"——三条都在这里现形。
+第二轮留下的 test_b 是 `failed`，而 wave 2 的审计按依赖排在它后面。要重派它，先得回答"failed 到底意味着什么"——四条都在这里现形。
 
 | #   | 缺陷                                                                | 现场表现                                                                                              | 为什么值得单独记                                                                                 |
 | --- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | 9   | 运行时的 Task 状态是**进程级**的，不是**结论级**的                    | test_b 第 1 次的 agent 进程干净退出，运行时把 Task 记成 `completed`；被拒的是交付物，不是进程        | 依赖它的 audit_b 按运行时图就是"可调度"的——**被拒的交付物在运行时眼里是已完成的**              |
 | 10  | 账本 `fold` 是**逐字段后写覆盖**，一次重试会把两次 attempt 拼成一个不存在的状态 | `test_b` 在视图里同时是 `state=ready`（第 2 次）与 `outcome=failed`（第 1 次），`placement` 指向 `test_b2`，而它记录的唯一写集来自已被拒的 `test_b` worktree | 账本文件是 append-only 的，**丢/串的是视图**；更糟的是写集按并集累积，重叠矩阵与"建议合并顺序"因此建立在任何单次 attempt 都没产生过的写集上 |
 | 11  | `--retry-of` 只认**失败的 Task**，且不接受新的 `--spec`               | 运行时认为 test_b 成功了，于是重试路径本身用不了；就算它是失败的，重试也只会把同一条错 spec 再发一遍    | **spec 层面的缺陷无法靠重试修复**——而第二轮的缺陷 8 恰恰是 spec 层面的                            |
+| 12  | worker 卡在弹窗上时，编排视图与"正在思考"**不可区分**                | 代答弹窗的监听器到期退出后，worker 空等约 15 分钟；整段时间 `worker-show` 恒为 `state=ready, stage=input_accepted, lastFailure=null` | 存活信号存在但对这条路径失效（详见下文）；**只报"还在跑"的视图支撑不了"该不该继续等"**             |
 
 第 10 条的判据是那句老话：**门报的每个集合/每个状态，先问"它是怎么被构造出来的"**。`foldLedger` 按 `entry.task` 归并，然后**对每个字段独立做后写覆盖**（`config/scripts/orchestration-schedule-ledger.mjs:145-196`），`files` 更是**只并不清**。于是一次重试不会"让失败消失"，而是造出一个**两次 attempt 拼接出来的状态**——它比纯粹的旧状态和新状态都更坏，因为没有任何一次 attempt 真的处于这个状态：
 
@@ -489,6 +490,22 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 **最贵的一环在下游**：写集是并集，所以 `WRITE-SET OVERLAP` 与 `SUGGESTED MERGE ORDER` 是建立在一个任何单次 attempt 都没产生过的写集上算出来的。本次靠显式写 `attempt: 2` 与 `supersedes` 把它留在账本里——但这是**协调者的自觉，不是工具的保证**。
 
 第 9、11 条合起来给出一条规程：**被拒的交付物要先把运行时 Task 改成 `failed`，再用新 Task 重派**。改状态不是记账美观问题——不改，`audit_b` 的依赖就会由一个被拒的 Task 满足。
+
+**第 12 条：无人值守的 worker 卡在弹窗上时，编排视图与"正在思考"不可区分。** 这一条是撞出来的——代答权限弹窗的监听器有 25 分钟截止，21:01 退出，而弹窗在那之后才出现，于是 worker 空等了约 15 分钟。整段时间里 `worker-show` 的输出没有任何变化：
+
+```text
+status: dispatched | state: ready | stage: input_accepted | lastFailure: null
+```
+
+机制上这不是偶然。设计里确实有存活信号——`dispatch_contexts.last_heartbeat_at` 加上 `warnStaleDispatches`（`src/main/runtime/orchestration/coordinator-task-dispatch.ts:19-25`）——但它对这条路径不成立，原因有三层叠加：
+
+1. 心跳由 worker **主动发消息**写入（`lifecycle-reconciliation.ts:171`），而 supervised 的 TUI worker（opencode / claude）不发心跳，所以 `last_heartbeat_at` 一直是 `null`。本次实测就是 `null`。
+2. `getStaleDispatches` 的判据是 `last_heartbeat_at IS NULL OR …`（`db/dispatch-context/dispatch-completion.ts:104-108`），**`null` 直接算过期**——一个健康但不发心跳的长任务，在这条规则下从第一分钟起就是"过期"的。
+3. 就算判据命中，`warnStaleDispatches` 也**只打日志、绝不自动失败**（注释写明：宁可漏报不可误杀）。
+
+三层叠起来的结果是：唯一还能用的信号是 `result.terminal.lastOutputAt`——它确实在 `worker-show` 的 JSON 里，但它是**终端字段，不是 dispatch 的存活字段**，没有任何 CLI 汇总它。
+
+**判据**：一个只报"还在跑"的视图，无法支撑"该不该继续等"这个决定。本次浪费的 15 分钟不是 worker 的问题，是**协调者只能靠人肉盯终端才发现它卡住了**。任何无人值守链路（定时任务、CI、跨会话接力）都会踩到同一条。
 
 **另一条边界（实测，非推断）**：worker 终端的环境**不是**从派发里注入的。`buildAgentStartupPlan` 只在 `args.agentEnv` 存在时带上 `env`（`src/shared/tui-agent-startup.ts:95`），而 `agentEnv` 来自 `resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv)`（`src/shared/agent-startup-plan-inputs.ts:60`）——**Orca 的应用设置**，不是账本派发。所以"用环境变量绕开一份坏的用户配置"在派发链上不成立：临时 `XDG_CONFIG_HOME` 能让命令行探测通过，worker 终端仍会读用户那份原配置。真正的出口是 Orca 设置里的 `agentDefaultEnv.opencode`，那是应用级设置、影响所有 opencode 终端。
 
