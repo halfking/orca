@@ -40,10 +40,17 @@ there is no other correct answer. The genuinely open part is narrower than it fi
 exist yet. The worker-start line in the compiler (`orchestration-wave-plan.mjs:273`) is emitted
 before any branch is created, so `branch` can only go on **`worker-done`**.
 
-**Who writes it?** Whoever settles the task. In this pilot that was the coordinator, because the
-supervised worker's process does not know where its work will be committed — the coordinator
-committed on the worker's behalf. That is the general shape: the settling party records the branch
-it landed the work on.
+**Who writes it?** Whoever settles the task — and the honest answer here is *nobody does it
+automatically*. Measured across the tree: `worker-done` appears **0 times** in the compiler, **0
+times** in the generated-script stub, and **0 times** in any of this pilot's four driver scripts.
+Every `worker-done` line in `run_f8f2a6573946.jsonl` was appended by the coordinator by hand, as
+inline JSON, during the run. That is also why the supervised worker's process cannot supply it: the
+worker does not know where its work will be committed — the coordinator committed on its behalf.
+
+So the design answer is: **`branch` goes on `worker-done`, written by the settling party, and
+today that party is a human.** Making it fail closed therefore means deciding what a settle flow
+looks like when there is no automated settler — otherwise a hand-written ledger would stop merging
+entirely, which is correct but not usable.
 
 ## What the ledger should have said for run_f8f2a6573946
 
@@ -57,14 +64,24 @@ it landed the work on.
 Note the first row: the landing branch is `halfking/impl_a-2`, not `halfking/impl_a`. The `-2` is
 why a name-guessing fix would also be wrong — the ledger has to record the real ref.
 
+## Blast radius: the gate tool only
+
+The compiled wave plan is not affected. For the merge task the compiler emits `gate-create` — a
+human decision gate — and no merge command and no branch resolution
+(`orchestration-wave-plan.mjs:325-348`); it emits no `worker-done` step at all. So the wrong
+resolution lives in exactly one place: `buildMergePlan`, which is invoked by the coordinator
+(as `.p4-evidence/p4-finish.mjs` does), not by the generated script.
+
 ## The change, in four parts
 
 1. `normalizeEntry` (`orchestration-schedule-ledger.mjs:44-71`) gains `branch: raw.branch ?? null`,
    and `foldLedger` carries it the same way it carries `runtimeTaskId`.
 2. `branchOf` reads `task.branch`. When it is null the plan carries a blocker naming the task,
    instead of silently substituting `placement.base`.
-3. The compiler's generated `worker-done` step writes `branch` from the commit the coordinator
-   recorded. The stub in `orchestration-generated-script-check.mjs` has to answer the new field.
+3. Whoever writes `worker-done` writes `branch` — and since nothing writes `worker-done`
+   automatically today, this step needs a settle helper that takes the landing branch and refuses
+   to write the entry without it. That helper is the real work here; the field itself is one line.
+   Without it, "fail closed" just means hand-written ledgers stop merging.
 4. The fixtures at `orchestration-merge-gate.test.mjs:64,73` are corrected to fork-from semantics,
    plus one regression test that feeds a realistic two-link chain and asserts the plan names
    `feature/test` — the case the current suite cannot express.
