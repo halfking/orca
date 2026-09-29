@@ -467,7 +467,7 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 
 **另外两条与围栏同源**：`task-create` 没有 `--run`，它永远建在终端当前绑定的 Run 上；重跑生成的脚本会开新 Run 并把协调者终端重新绑过去，于是上一轮的任务对 `task-create` 变成"另一个 Run 的依赖"。续跑一个 Run 必须先 `orca orchestration run-use --id <run> --from <handle>` 绑回去。
 
-#### 4.7.9 P4 第三轮：拒绝一次交付，牵出三条"状态不是它自称的那种状态"
+#### 4.7.9 P4 第三轮：拒绝一次交付，牵出六条"状态不是它自称的那种状态"
 
 第二轮留下的 test_b 是 `failed`，而 wave 2 的审计按依赖排在它后面。要重派它，先得回答"failed 到底意味着什么"——四条都在这里现形。
 
@@ -477,6 +477,9 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 | 10  | 账本 `fold` 是**逐字段后写覆盖**，一次重试会把两次 attempt 拼成一个不存在的状态 | `test_b` 在视图里同时是 `state=ready`（第 2 次）与 `outcome=failed`（第 1 次），`placement` 指向 `test_b2`，而它记录的唯一写集来自已被拒的 `test_b` worktree | 账本文件是 append-only 的，**丢/串的是视图**；更糟的是写集按并集累积，重叠矩阵与"建议合并顺序"因此建立在任何单次 attempt 都没产生过的写集上 |
 | 11  | `--retry-of` 只认**失败的 Task**，且不接受新的 `--spec`               | 运行时认为 test_b 成功了，于是重试路径本身用不了；就算它是失败的，重试也只会把同一条错 spec 再发一遍    | **spec 层面的缺陷无法靠重试修复**——而第二轮的缺陷 8 恰恰是 spec 层面的                            |
 | 12  | worker 卡在弹窗上时，编排视图与"正在思考"**不可区分**                | 代答弹窗的监听器到期退出后，worker 空等约 15 分钟；整段时间 `worker-show` 恒为 `state=ready, stage=input_accepted, lastFailure=null` | 存活信号存在但对这条路径失效（详见下文）；**只报"还在跑"的视图支撑不了"该不该继续等"**             |
+| 13  | `writeSet` 是**建议**的，但下游一律当它是**权威**的                    | impl_b 声明写集 2 个文件、实际改 5 个，越出 3 个（含 2 个测试文件）；`writeSet` 全仓只被用于"只读任务必须为空"与"算重叠矩阵"，**从不与实际改动比对** | 编译期算出的合并顺序与冲突归属来自**声明**；实现者越界时，那两件事都建立在不完整的文件集上         |
+| 14  | 提交钩子在提交**过程中**改文件，提交记录的是改之前的字节                | lint-staged 的 `oxfmt --write`：提交时 596 有效行、oxlint 绿；提交后工作树 656 行、`max-lines` 红   | "提交是绿的"不等于"提交进去的内容过了门"；门验的是被改写前的副本                                   |
+| 15  | 折叠视图的 JSON 带着 `findings`，**文本渲染把它丢了**                    | test_b 被协调者判为"跑成了但整批丢弃"，文本回放里只有 `completed succeeded`，看不出任何拒绝         | 证据在账本里，但**人读的那份视图里没有**；复盘的人看到的是"它过了"                                 |
 
 第 10 条的判据是那句老话：**门报的每个集合/每个状态，先问"它是怎么被构造出来的"**。`foldLedger` 按 `entry.task` 归并，然后**对每个字段独立做后写覆盖**（`config/scripts/orchestration-schedule-ledger.mjs:145-196`），`files` 更是**只并不清**。于是一次重试不会"让失败消失"，而是造出一个**两次 attempt 拼接出来的状态**——它比纯粹的旧状态和新状态都更坏，因为没有任何一次 attempt 真的处于这个状态：
 
@@ -506,6 +509,29 @@ status: dispatched | state: ready | stage: input_accepted | lastFailure: null
 三层叠起来的结果是：唯一还能用的信号是 `result.terminal.lastOutputAt`——它确实在 `worker-show` 的 JSON 里，但它是**终端字段，不是 dispatch 的存活字段**，没有任何 CLI 汇总它。
 
 **判据**：一个只报"还在跑"的视图，无法支撑"该不该继续等"这个决定。本次浪费的 15 分钟不是 worker 的问题，是**协调者只能靠人肉盯终端才发现它卡住了**。任何无人值守链路（定时任务、CI、跨会话接力）都会踩到同一条。
+
+**第 13 条是这一轮最贵的结构性发现，而且它的后果是**测试任务本身失去意义**。`writeSet` 在全仓只有两个消费者：`orchestration-wave-plan.mjs:154,157` 用它校验"只读任务的写集必须为空、能落地的任务必须声明写集"，以及 `:195-196` 用它算编译期的重叠矩阵。**没有任何地方把它和 worker 实际改了什么做比对。** 实测：
+
+```text
+impl_a: 声明 2 / 实际 2    越出: 无
+impl_b: 声明 2 / 实际 5    越出: + merge-gate-test-fixtures.mjs
+                              + orchestration-merge-gate-record.test.mjs
+                              + orchestration-merge-gate.test.mjs
+test_a: 声明 1 / 实际 1    越出: 无
+test_b: 声明 1 / 实际 1    越出: 无
+```
+
+impl_b 越界写了两个测试文件，而它下游的 test_b 的任务就是"给这个特性补测试"。于是 test_b 第 2 次跑出来的 4 个用例，**逐条都是 impl_b 已经写过的**——不是"覆盖相似"，是 impl_b 连 `resultingCommit` 的 40 位十六进制、以及第二个条目的 commit 等于 base HEAD 都断言过了。
+
+净增覆盖：**0**。干净的 impl_b 是 43 例通过（37 + 6），worker 的版本是 41 例在一个文件里，等于把同样的 43 例拆散重排再加 4 条重复。
+
+**所以这不是 worker 的错，是我写的 spec 错了**——第三次了（缺陷 8 的 runner、这一轮的重复覆盖、加上第 13 条本身）。而 spec 会错，根因是**写集没有被强制**：如果编排在 worker settle 时比对"实际改动 ⊆ 声明写集"，impl_b 越界那一刻就会被拦下，test_b 的 spec 也就能写出真正没人覆盖的东西。
+
+**判据**：一道只被"声明"喂饱、从不与现实对账的门，等于没有门。合并顺序、冲突归属、"这个文件归谁"——这三件事全都建立在 worker 自报的写集上，而自报是全世界最容易出错的输入。
+
+第 14 条是同一族的另一个形状：**门验的不是提交进去的那份内容**。lint-staged 的 `oxfmt --write` 在 pre-commit 里就地改文件，于是"oxlint 绿"验的是格式化**前**的字节，提交记录的也是那份，格式化产物留在工作树里——而它把这个文件从 596 有效行推到 656，直接顶破同一文件上的 `max-lines 600`。上一轮 impl_b 撞的 600 行墙、这一轮 test_b 撞的同一堵墙，都是这么来的：**一个 600 行的上限，配一个只会把行数往上加的格式化器。**
+
+第 15 条最朴素但最该记：`foldLedger` 确实把 `findings` 带进了视图的 **JSON**，可文本渲染只打 `verdict / outcome / placement / files`。所以 test_b 那条"跑成了但整批丢弃"的判定，**在账本里，在 JSON 里，在人读的那份回放里不在**。复盘的人看到的是 `completed succeeded`。
 
 **另一条边界（实测，非推断）**：worker 终端的环境**不是**从派发里注入的。`buildAgentStartupPlan` 只在 `args.agentEnv` 存在时带上 `env`（`src/shared/tui-agent-startup.ts:95`），而 `agentEnv` 来自 `resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv)`（`src/shared/agent-startup-plan-inputs.ts:60`）——**Orca 的应用设置**，不是账本派发。所以"用环境变量绕开一份坏的用户配置"在派发链上不成立：临时 `XDG_CONFIG_HOME` 能让命令行探测通过，worker 终端仍会读用户那份原配置。真正的出口是 Orca 设置里的 `agentDefaultEnv.opencode`，那是应用级设置、影响所有 opencode 终端。
 
