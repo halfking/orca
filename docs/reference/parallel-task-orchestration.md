@@ -467,7 +467,7 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 
 **另外两条与围栏同源**：`task-create` 没有 `--run`，它永远建在终端当前绑定的 Run 上；重跑生成的脚本会开新 Run 并把协调者终端重新绑过去，于是上一轮的任务对 `task-create` 变成"另一个 Run 的依赖"。续跑一个 Run 必须先 `orca orchestration run-use --id <run> --from <handle>` 绑回去。
 
-#### 4.7.9 P4 第三轮：拒绝一次交付，牵出六条"状态不是它自称的那种状态"
+#### 4.7.9 P4 第三轮：拒绝一次交付，牵出八条"状态不是它自称的那种状态"
 
 第二轮留下的 test_b 是 `failed`，而 wave 2 的审计按依赖排在它后面。要重派它，先得回答"failed 到底意味着什么"——四条都在这里现形。
 
@@ -480,6 +480,7 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 | 13  | `writeSet` 是**建议**的，但下游一律当它是**权威**的                    | impl_b 声明写集 2 个文件、实际改 5 个，越出 3 个（含 2 个测试文件）；`writeSet` 全仓只被用于"只读任务必须为空"与"算重叠矩阵"，**从不与实际改动比对** | 编译期算出的合并顺序与冲突归属来自**声明**；实现者越界时，那两件事都建立在不完整的文件集上         |
 | 14  | 提交钩子在提交**过程中**改文件，提交记录的是改之前的字节                | lint-staged 的 `oxfmt --write`：提交时 596 有效行、oxlint 绿；提交后工作树 656 行、`max-lines` 红   | "提交是绿的"不等于"提交进去的内容过了门"；门验的是被改写前的副本                                   |
 | 15  | 折叠视图的 JSON 带着 `findings`，**文本渲染把它丢了**                    | test_b 被协调者判为"跑成了但整批丢弃"，文本回放里只有 `completed succeeded`，看不出任何拒绝         | 证据在账本里，但**人读的那份视图里没有**；复盘的人看到的是"它过了"                                 |
+| 16  | 本地 `main` ref 可能**过期且被别的会话占用**，拿它当合并基线会验错东西     | 本地 `main` = `5441ce7c4`，检出在另一个会话的 worktree `orca-wt-ledger`；`origin/main` = `102deffa7`，**本项目推的 5 个提交一个都不在本地 main 上** | 第一次合并预演跑在过期基线上，三个分支"全部干净"——**这个结论什么也没证明** |
 
 第 10 条的判据是那句老话：**门报的每个集合/每个状态，先问"它是怎么被构造出来的"**。`foldLedger` 按 `entry.task` 归并，然后**对每个字段独立做后写覆盖**（`config/scripts/orchestration-schedule-ledger.mjs:145-196`），`files` 更是**只并不清**。于是一次重试不会"让失败消失"，而是造出一个**两次 attempt 拼接出来的状态**——它比纯粹的旧状态和新状态都更坏，因为没有任何一次 attempt 真的处于这个状态：
 
@@ -532,6 +533,20 @@ impl_b 越界写了两个测试文件，而它下游的 test_b 的任务就是"�
 第 14 条是同一族的另一个形状：**门验的不是提交进去的那份内容**。lint-staged 的 `oxfmt --write` 在 pre-commit 里就地改文件，于是"oxlint 绿"验的是格式化**前**的字节，提交记录的也是那份，格式化产物留在工作树里——而它把这个文件从 596 有效行推到 656，直接顶破同一文件上的 `max-lines 600`。上一轮 impl_b 撞的 600 行墙、这一轮 test_b 撞的同一堵墙，都是这么来的：**一个 600 行的上限，配一个只会把行数往上加的格式化器。**
 
 第 15 条最朴素但最该记：`foldLedger` 确实把 `findings` 带进了视图的 **JSON**，可文本渲染只打 `verdict / outcome / placement / files`。所以 test_b 那条"跑成了但整批丢弃"的判定，**在账本里，在 JSON 里，在人读的那份回放里不在**。复盘的人看到的是 `completed succeeded`。
+
+第 16 条是这一轮差点让我交出假结论的坑。合并预演第一次跑完，**三个分支全部干净合并**——但那个基线是本地 `main`（`5441ce7c4`），而它检出在**另一个会话的 worktree** `orca-wt-ledger` 里，且**不含本项目推上 `origin/main` 的那 5 个提交**（`origin/main` 已经是 `102deffa7`）。在过期基线上"合并干净"什么也不证明。改用 `origin/main` 重跑才是有效证据：
+
+```text
+base: origin/main = 102deffa7
+  halfking/impl_a-2: clean
+  halfking/test_a:   clean
+  halfking/impl_b:   clean
+  halfking/test_b:   （已 reset 回 impl_b，无新内容）
+  合并结果：vitest 4 文件 81 例全过 / oxlint 干净 /
+            generated-script PASS / argv-contract schema 9/9
+```
+
+**判据**：多 worktree 仓库里，`main` 是一个**被某个 worktree 占用、可能长期不动**的本地 ref。凡是要"合到 main"，先问一句**这个 main 是不是远端那个**——`git merge-base --is-ancestor <你刚推的提交> main` 一行就能验。
 
 **另一条边界（实测，非推断）**：worker 终端的环境**不是**从派发里注入的。`buildAgentStartupPlan` 只在 `args.agentEnv` 存在时带上 `env`（`src/shared/tui-agent-startup.ts:95`），而 `agentEnv` 来自 `resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv)`（`src/shared/agent-startup-plan-inputs.ts:60`）——**Orca 的应用设置**，不是账本派发。所以"用环境变量绕开一份坏的用户配置"在派发链上不成立：临时 `XDG_CONFIG_HOME` 能让命令行探测通过，worker 终端仍会读用户那份原配置。真正的出口是 Orca 设置里的 `agentDefaultEnv.opencode`，那是应用级设置、影响所有 opencode 终端。
 
