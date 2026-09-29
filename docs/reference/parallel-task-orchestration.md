@@ -467,7 +467,7 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 
 **另外两条与围栏同源**：`task-create` 没有 `--run`，它永远建在终端当前绑定的 Run 上；重跑生成的脚本会开新 Run 并把协调者终端重新绑过去，于是上一轮的任务对 `task-create` 变成"另一个 Run 的依赖"。续跑一个 Run 必须先 `orca orchestration run-use --id <run> --from <handle>` 绑回去。
 
-#### 4.7.9 P4 第三轮：拒绝一次交付，牵出八条"状态不是它自称的那种状态"
+#### 4.7.9 P4 第三轮：拒绝一次交付，牵出九条"状态不是它自称的那种状态"
 
 第二轮留下的 test_b 是 `failed`，而 wave 2 的审计按依赖排在它后面。要重派它，先得回答"failed 到底意味着什么"——四条都在这里现形。
 
@@ -481,6 +481,7 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 | 14  | 提交钩子在提交**过程中**改文件，提交记录的是改之前的字节                | lint-staged 的 `oxfmt --write`：提交时 596 有效行、oxlint 绿；提交后工作树 656 行、`max-lines` 红   | "提交是绿的"不等于"提交进去的内容过了门"；门验的是被改写前的副本                                   |
 | 15  | 折叠视图的 JSON 带着 `findings`，**文本渲染把它丢了**                    | test_b 被协调者判为"跑成了但整批丢弃"，文本回放里只有 `completed succeeded`，看不出任何拒绝         | 证据在账本里，但**人读的那份视图里没有**；复盘的人看到的是"它过了"                                 |
 | 16  | 本地 `main` ref 可能**过期且被别的会话占用**，拿它当合并基线会验错东西     | 本地 `main` = `5441ce7c4`，检出在另一个会话的 worktree `orca-wt-ledger`；`origin/main` = `102deffa7`，**本项目推的 5 个提交一个都不在本地 main 上** | 第一次合并预演跑在过期基线上，三个分支"全部干净"——**这个结论什么也没证明** |
+| 17  | 门禁把任务的 **`placement.base`（从哪 fork）当成要合的分支**；而"落在哪个分支"账本里根本没有字段 | 真 run 上打印的 ORDER 是 `impl_a→pilot/p4-two-task-pilot`、`test_a→halfking/impl_a-2`、`impl_b→pilot/…`、`test_b→halfking/impl_b`——**`halfking/test_a` 永远不会被合** | 门会自信地打印一份错误的计划并照着执行；**这是"门读了它没读的东西"里最贵的一种** |
 
 第 10 条的判据是那句老话：**门报的每个集合/每个状态，先问"它是怎么被构造出来的"**。`foldLedger` 按 `entry.task` 归并，然后**对每个字段独立做后写覆盖**（`config/scripts/orchestration-schedule-ledger.mjs:145-196`），`files` 更是**只并不清**。于是一次重试不会"让失败消失"，而是造出一个**两次 attempt 拼接出来的状态**——它比纯粹的旧状态和新状态都更坏，因为没有任何一次 attempt 真的处于这个状态：
 
@@ -547,6 +548,48 @@ base: origin/main = 102deffa7
 ```
 
 **判据**：多 worktree 仓库里，`main` 是一个**被某个 worktree 占用、可能长期不动**的本地 ref。凡是要"合到 main"，先问一句**这个 main 是不是远端那个**——`git merge-base --is-ancestor <你刚推的提交> main` 一行就能验。
+
+**第 17 条是整个 pilot 最贵的一条，而且它让 `merge --execute` 在修好之前不能碰。**
+
+`buildMergePlan` 这样取分支（`config/scripts/orchestration-merge-gate.mjs:130`）：
+
+```js
+const branchOf = (id) => view.folded.tasks.find((t) => t.id === id)?.placement?.base ?? null
+```
+
+`placement.base` 是任务**从哪儿 fork 出来**的。任务**落在哪个分支**在账本里**没有字段可放**——`normalizeEntry` 根本没有 `branch`（`orchestration-schedule-ledger.mjs:44-71`）。于是门禁对每个任务都合它的**父分支**。在真实 run 上它打印出来的计划是：
+
+```text
+ORDER
+  1. impl_a   pilot/p4-two-task-pilot
+  2. test_a   halfking/impl_a-2
+  3. impl_b   pilot/p4-two-task-pilot
+  4. test_b   halfking/impl_b
+```
+
+`halfking/test_a` **一次都不会被合**；`test_a` 那一格放的是 impl_a 的分支；impl_a 和 impl_b 两格指向同一个 pilot 分支。**它会照着这份计划执行。**
+
+**为什么 56 例的测试套件抓不到**：夹具把 `placement.base` 填成**落地分支**——`base: 'feature/a'`（`orchestration-merge-gate.test.mjs:64,73`）——恰好是实现假设的那一种含义。**夹具复刻了被测代码的误解，于是套件在一个错误行为上是绿的。** 编译器与协调者写的账本填的是 fork 起点，两边对 `base` 这个词的用法根本不一致，而且没有任何地方把它们对齐过。
+
+复现脚本（同一份代码，两种填法，两份计划）：
+
+```text
+$ node .p4-evidence/repro-branch-resolution.mjs
+ground truth:  impl_a: forked from feature/impl, landed on feature/impl
+               test_a: forked from feature/impl, landed on feature/test
+
+MERGE PLAN when placement.base means "forked from" (what a real writer emits):
+  impl_a -> feature/impl
+  test_a -> feature/impl      ← 父分支，错的
+
+MERGE PLAN when placement.base means "landed on" (what the test fixtures emit):
+  impl_a -> feature/impl
+  test_a -> feature/test      ← 夹具那一种，所以套件绿
+```
+
+**判据**：一份门禁测试的夹具，如果它的字段含义是**照着实现写的**，那它测的是"实现和自己的假设一致"，不是"实现对"。**先问这个字段在真实写入方眼里是什么意思**，再问夹具怎么填的。
+
+**修法的形状**（尚未落地，因为它有一个需要人来定的问题）：`normalizeEntry` 加 `branch` 字段，`foldLedger` 透传，`branchOf` 改读它；**并且在 `branch` 缺失时必须 fail closed，而不是回落到 `placement.base`**——回落到今天这个字段，正是这个缺陷的成因。缺失时该报什么、写 `worker-done` 时谁负责填它，都是要先定下来的设计问题，不是顺手改一行。
 
 **另一条边界（实测，非推断）**：worker 终端的环境**不是**从派发里注入的。`buildAgentStartupPlan` 只在 `args.agentEnv` 存在时带上 `env`（`src/shared/tui-agent-startup.ts:95`），而 `agentEnv` 来自 `resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv)`（`src/shared/agent-startup-plan-inputs.ts:60`）——**Orca 的应用设置**，不是账本派发。所以"用环境变量绕开一份坏的用户配置"在派发链上不成立：临时 `XDG_CONFIG_HOME` 能让命令行探测通过，worker 终端仍会读用户那份原配置。真正的出口是 Orca 设置里的 `agentDefaultEnv.opencode`，那是应用级设置、影响所有 opencode 终端。
 
