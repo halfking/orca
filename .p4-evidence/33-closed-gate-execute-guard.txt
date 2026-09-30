@@ -1,0 +1,43 @@
+Does 'merge --execute' really refuse while the gate is closed?
+measured 2026-09-30 13:03:38 against a throwaway repository, never the pilot worktree
+
+Why this had to be measured rather than read: every serious finding in this pilot came
+from code that read one way and behaved another. The guard that makes the current blocked
+state safe is 'merge gate is closed; nothing was merged' — and the real cost of getting
+that wrong would be merging wrong branches into a base.
+
+Three earlier attempts were confounded and had to be redone:
+  1. ledger.jsonl left inside the repo  -> the DIRTY refusal fired, not the gate refusal
+  2. clean repo but task forked from the merge base -> ORDER empty, gate had nothing to refuse
+  3. task forks from a separate 'seed' -> ORDER non-empty. This is the real-run shape.
+
+--- fixture ---
+  merge base      = main
+  fork base       = seed           (ledger placement.base)
+  real landing    = halfking-impl_a  <- what a correct gate would merge
+  working tree    = 0 changes
+  gate            = CLOSED (no audit verdict recorded)
+
+--- actual output ---
+MERGE PLAN  base=main  repo=/tmp/.../repo
+  worktree clean
+  gate CLOSED
+
+ORDER
+  1. impl_a         seed                         already-merged | behind 1
+merge gate is closed; nothing was merged
+exit=1
+
+--- repository afterwards ---
+  a.txt  = base            (unchanged)
+  HEAD   = main moves on   (unchanged)
+
+Result: with a non-empty plan and a clean tree, --execute still refuses and leaves the
+repository untouched. The blocked state is safe to sit in.
+
+Bonus: this is an independent third confirmation of finding 17, in a fixture built from
+scratch. The gate resolved impl_a to 'seed' when the landing branch is 'halfking-impl_a'.
+Note the failure mode differs by shape: here the wrong branch is already-merged, so an open
+gate would have silently merged nothing at all. In the real run the wrong branch is neither
+merged nor the base, so an open gate would have merged the wrong branch for real. Both are
+failures; one is silent, the other is destructive.
