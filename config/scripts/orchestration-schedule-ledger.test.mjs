@@ -177,6 +177,52 @@ describe('folding the append-only trail', () => {
     })
   })
 
+  // The plan's own id is what the DAG, the merge order and every report are keyed on. The runtime
+  // id is kept beside it, never instead of it: a view keyed on runtime ids fragments the moment a
+  // task is re-created. This field had no test at all — a mutation set it to null and all 19 cases
+  // stayed green — so it gets one that reads it back off a folded task.
+  it('keeps the runtime task id beside the plan id, never instead of it', () => {
+    const foldedAgain = foldLedger([
+      ...LEDGER,
+      entry({
+        run: 'run_test',
+        task: 'impl_a',
+        event: 'worker-start',
+        role: 'implementer',
+        agent: 'opencode',
+        state: 'ready',
+        deps: [],
+        runtimeTaskId: 'task_runtime_1',
+        placement: { worktree: 'w', base: 'main', isolation: 'worktree' }
+      })
+    ])
+    const implA = foldedAgain.tasks.find((task) => task.id === 'impl_a')
+    expect(implA.id).toBe('impl_a')
+    expect(implA.runtimeTaskId).toBe('task_runtime_1')
+  })
+
+  it('records the branch a task landed on, which placement.base does not say', () => {
+    const foldedAgain = foldLedger([
+      ...LEDGER,
+      entry({
+        run: 'run_test',
+        task: 'impl_b',
+        event: 'worker-done',
+        role: 'implementer',
+        agent: 'opencode',
+        state: 'completed',
+        outcome: 'succeeded',
+        deps: [],
+        branch: 'feature/impl-b',
+        filesModified: ['src/b.ts'],
+        placement: { worktree: 'w', base: 'main', isolation: 'worktree' }
+      })
+    ])
+    const implB = foldedAgain.tasks.find((task) => task.id === 'impl_b')
+    expect(implB.branch).toBe('feature/impl-b')
+    expect(implB.placement.base).toBe('main')
+  })
+
   it('derives the wave from the dependency DAG rather than trusting a recorded wave', () => {
     const waves = Object.fromEntries(folded.tasks.map((task) => [task.id, task.wave]))
     expect(waves).toEqual({ impl_a: 0, impl_b: 0, audit_a: 1, audit_b: 1, merge: 2 })

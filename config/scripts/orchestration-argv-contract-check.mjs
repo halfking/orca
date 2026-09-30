@@ -99,7 +99,12 @@ if (compiled.errors.length > 0) {
   process.exit(1)
 }
 
-function classify(argv) {
+/**
+ * Map what the binary said into a verdict. Exported for the same reason as argvCheckExitCode: the
+ * decision and the classification are two separate ways this check can be weakened, and a test on
+ * one of them says nothing about the other.
+ */
+export function classify(argv) {
   // argv[0] is the executable the generated script substitutes for $ORCA.
   const bin = argv[0]
   if (!bin) {
@@ -116,7 +121,11 @@ function classify(argv) {
     stdout = String(error.stdout ?? '')
     stderr = String(error.stderr ?? '')
   }
-  const text = `${stdout}${stderr}`
+  return classifyProbeResult(`${stdout}${stderr}`)
+}
+
+/** See `classify`. */
+export function classifyProbeResult(text) {
   if (
     /Unknown flag|Unknown option|Unknown argument|unknown option|unexpected argument/i.test(text)
   ) {
@@ -298,19 +307,46 @@ if (LIVE) {
   )
 }
 
+/**
+ * Whether this check passes. Exported so it can be tested: the decision that made a live probe
+ * with an unreachable runtime fail closed used to live inline at the end of a script that also
+ * does filesystem and subprocess work, which is why nothing caught it being weakened. The P4
+ * pilot could turn `UNVERIFIED` into `ACCEPTED` and the whole file stayed green.
+ */
+export function argvCheckExitCode({ schemaBad, probeResults, allowUnverified = false } = {}) {
+  if ((schemaBad?.length ?? 0) > 0) {
+    return 1
+  }
+  // No probe ran (`--live` absent): there is nothing to judge, and the schema layer already spoke.
+  if (!Array.isArray(probeResults)) {
+    return 0
+  }
+  // --live was asked for and produced no rows. That is silence, not success: the probe either
+  // never ran or found nothing to probe, and both mean the shapes went unexercised.
+  if (probeResults.length === 0) {
+    return 1
+  }
+  const bad = probeResults.some(
+    (result) =>
+      result.verdict === 'REJECTED' ||
+      result.verdict === 'SHAPE-ERROR' ||
+      result.verdict === 'UNKNOWN'
+  )
+  // An unexercised shape is unproven, not fine. `allowUnverified` is the only way past, and it has
+  // to be asked for.
+  const unproven =
+    probeResults.some((result) => result.verdict === 'UNVERIFIED') && !allowUnverified
+  return bad || unproven ? 1 : 0
+}
+
 const dir = mkdtempSync(join(tmpdir(), 'orca-argv-'))
 writeFileSync(
   join(dir, 'result.json'),
   JSON.stringify({ schema: schemaResults, probe: probeResults }, null, 2)
 )
 process.stdout.write(`detail: ${join(dir, 'result.json')}\n`)
-const probeFailed =
-  Array.isArray(probeResults) &&
-  (probeResults.some(
-    (result) =>
-      result.verdict === 'REJECTED' ||
-      result.verdict === 'SHAPE-ERROR' ||
-      result.verdict === 'UNKNOWN'
-  ) ||
-    (probeResults.some((result) => result.verdict === 'UNVERIFIED') && !ALLOW_UNVERIFIED))
-process.exitCode = schemaBad.length === 0 && !probeFailed ? 0 : 1
+process.exitCode = argvCheckExitCode({
+  schemaBad,
+  probeResults,
+  allowUnverified: ALLOW_UNVERIFIED
+})

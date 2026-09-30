@@ -19,7 +19,7 @@ import { join } from 'node:path'
 import { buildView, parseLedger } from './orchestration-schedule-ledger.mjs'
 import { compilePlan } from './orchestration-wave-plan.mjs'
 
-const STUB = `#!/usr/bin/env node
+export const STUB = `#!/usr/bin/env node
 // Stand-in for the orca CLI: records what it was asked for, answers with a receipt.
 import { appendFileSync, readFileSync, existsSync } from 'node:fs'
 
@@ -63,179 +63,206 @@ if (command === 'run-create') {
 }
 `
 
-const dir = mkdtempSync(join(tmpdir(), 'orca-e2e-'))
-const logPath = join(dir, 'orca-calls.jsonl')
-writeFileSync(logPath, '')
+// The whole check runs only when this file is invoked. A test imports STUB from here, and running
+// the check on import threw out of the module — under vitest a regression then surfaced as
+// "Tests no tests" instead of as the failure it is. That is the same shape as the pilot's own
+// finding: a suite that vanishes looks like a runner problem, not a defect.
+function main() {
+  const dir = mkdtempSync(join(tmpdir(), 'orca-e2e-'))
+  const logPath = join(dir, 'orca-calls.jsonl')
+  writeFileSync(logPath, '')
 
-const stubPath = join(dir, 'orca')
-writeFileSync(stubPath, STUB)
-chmodSync(stubPath, 0o755)
+  const stubPath = join(dir, 'orca')
+  writeFileSync(stubPath, STUB)
+  chmodSync(stubPath, 0o755)
 
-const plan = {
-  objective: 'two independent changes, audited, merged behind one gate',
-  base: 'main',
-  confirmModels: false,
-  tasks: [
-    {
-      id: 'impl_a',
-      role: 'implementer',
-      title: 'implement alpha',
-      spec: 'do alpha',
-      writeSet: ['src/a.ts'],
-      deps: []
-    },
-    {
-      id: 'impl_b',
-      role: 'implementer',
-      title: 'implement beta',
-      spec: 'do beta',
-      writeSet: ['src/b.ts'],
-      deps: []
-    },
-    { id: 'audit_a', role: 'auditor', title: 'audit alpha', spec: 'audit alpha', deps: ['impl_a'] },
-    { id: 'audit_b', role: 'auditor', title: 'audit beta', spec: 'audit beta', deps: ['impl_b'] },
-    { id: 'merge', role: 'merger', title: 'merge', spec: 'merge all', deps: ['audit_a', 'audit_b'] }
-  ]
-}
-
-const compiled = compilePlan(plan)
-if (compiled.errors.length > 0) {
-  process.stderr.write(`plan does not compile: ${compiled.errors.join('; ')}\n`)
-  process.exit(1)
-}
-
-// Emit through the CLI, not the internal renderer, so the file under test is the one an operator
-// would actually get.
-const planPath = join(dir, 'plan.json')
-writeFileSync(planPath, JSON.stringify(plan, null, 2))
-const script = execFileSync(
-  'node',
-  [
-    join(import.meta.dirname, 'orchestration-wave-plan.mjs'),
-    'emit',
-    '--plan',
-    planPath,
-    '--allow-warnings'
-  ],
-  { encoding: 'utf8' }
-)
-const scriptPath = join(dir, 'run.sh')
-writeFileSync(scriptPath, script)
-
-let runOutput = ''
-let runFailed = false
-try {
-  runOutput = execFileSync('bash', [scriptPath], {
-    encoding: 'utf8',
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ORCA_STUB_LOG: logPath },
-    cwd: dir
-  })
-} catch (error) {
-  runFailed = true
-  runOutput = `${error.stdout ?? ''}${error.stderr ?? ''}`
-}
-
-const calls = readFileSync(logPath, 'utf8')
-  .split('\n')
-  .filter((line) => line.trim() !== '')
-  .map((line) => JSON.parse(line))
-const ledgerPath = join(dir, '.orca', 'orchestration-ledger', 'run_stub.jsonl')
-const ledgerExists = readFileSync(ledgerPath, 'utf8').length > 0
-
-const failures = []
-const check = (label, condition, detail = '') => {
-  if (!condition) {
-    failures.push(`${label}${detail ? `: ${detail}` : ''}`)
+  const plan = {
+    objective: 'two independent changes, audited, merged behind one gate',
+    base: 'main',
+    confirmModels: false,
+    tasks: [
+      {
+        id: 'impl_a',
+        role: 'implementer',
+        title: 'implement alpha',
+        spec: 'do alpha',
+        writeSet: ['src/a.ts'],
+        deps: []
+      },
+      {
+        id: 'impl_b',
+        role: 'implementer',
+        title: 'implement beta',
+        spec: 'do beta',
+        writeSet: ['src/b.ts'],
+        deps: []
+      },
+      {
+        id: 'audit_a',
+        role: 'auditor',
+        title: 'audit alpha',
+        spec: 'audit alpha',
+        deps: ['impl_a']
+      },
+      { id: 'audit_b', role: 'auditor', title: 'audit beta', spec: 'audit beta', deps: ['impl_b'] },
+      {
+        id: 'merge',
+        role: 'merger',
+        title: 'merge',
+        spec: 'merge all',
+        deps: ['audit_a', 'audit_b']
+      }
+    ]
   }
-  process.stdout.write(
-    `${condition ? 'OK  ' : 'FAIL'} ${label}${condition || !detail ? '' : ` — ${detail}`}\n`
+
+  const compiled = compilePlan(plan)
+  if (compiled.errors.length > 0) {
+    process.stderr.write(`plan does not compile: ${compiled.errors.join('; ')}\n`)
+    process.exit(1)
+  }
+
+  // Emit through the CLI, not the internal renderer, so the file under test is the one an operator
+  // would actually get.
+  const planPath = join(dir, 'plan.json')
+  writeFileSync(planPath, JSON.stringify(plan, null, 2))
+  const script = execFileSync(
+    'node',
+    [
+      join(import.meta.dirname, 'orchestration-wave-plan.mjs'),
+      'emit',
+      '--plan',
+      planPath,
+      '--allow-warnings'
+    ],
+    { encoding: 'utf8' }
   )
-}
+  const scriptPath = join(dir, 'run.sh')
+  writeFileSync(scriptPath, script)
 
-check('generated script runs to completion', !runFailed, runOutput.slice(0, 300))
-check('every task was created', calls.filter((call) => call[1] === 'task-create').length === 5)
-check(
-  'every dispatched role was started',
-  calls.filter((call) => call[1] === 'worker-start').length === 4
-)
-check(
-  'the merge wave became a gate, not an agent',
-  calls.filter((call) => call[1] === 'gate-create').length === 1
-)
-// Verified live on orca 1.4.197: a worker-start without --from is fenced, and the first failure a
-// real run sees is `selector_not_found` on the worktree selector, which blames the wrong flag. A
-// stub that answers every command the same way would pass this file with the bug still in it, so
-// the stub records the argv and this asserts the coordinator handle actually reached the binary.
-const startCalls = calls.filter((call) => call[1] === 'worker-start')
-check(
-  'every dispatch names the coordinator terminal from the run receipt',
-  startCalls.length > 0 &&
-    startCalls.every((call) => {
-      const at = call.indexOf('--from')
-      return at !== -1 && call[at + 1] === 'term_stub'
-    }),
-  startCalls.map((call) => call[call.indexOf('--from') + 1]).join(',')
-)
-check(
-  'no dispatch passes a literal $RUN_COORDINATOR',
-  startCalls.every((call) => !call.includes('$RUN_COORDINATOR'))
-)
-
-// The point of the exercise: --deps must carry the ids task-create actually returned, not the
-// symbolic plan names, and must still be valid JSON after shell expansion.
-const depArgs = calls
-  .filter((call) => call[1] === 'task-create')
-  .map((call) => call[call.indexOf('--deps') + 1])
-  .filter((value) => value !== '[]')
-for (const value of depArgs) {
-  let parsed = null
+  let runOutput = ''
+  let runFailed = false
   try {
-    parsed = JSON.parse(value)
-  } catch {
-    failures.push(`--deps is not valid JSON after expansion: ${value}`)
+    runOutput = execFileSync('bash', [scriptPath], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ORCA_STUB_LOG: logPath },
+      cwd: dir
+    })
+  } catch (error) {
+    runFailed = true
+    runOutput = `${error.stdout ?? ''}${error.stderr ?? ''}`
   }
+
+  const calls = readFileSync(logPath, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line))
+  const ledgerPath = join(dir, '.orca', 'orchestration-ledger', 'run_stub.jsonl')
+  const ledgerExists = readFileSync(ledgerPath, 'utf8').length > 0
+
+  const failures = []
+  const check = (label, condition, detail = '') => {
+    if (!condition) {
+      failures.push(`${label}${detail ? `: ${detail}` : ''}`)
+    }
+    process.stdout.write(
+      `${condition ? 'OK  ' : 'FAIL'} ${label}${condition || !detail ? '' : ` — ${detail}`}\n`
+    )
+  }
+
+  check('generated script runs to completion', !runFailed, runOutput.slice(0, 300))
+  check('every task was created', calls.filter((call) => call[1] === 'task-create').length === 5)
   check(
-    `--deps parses and holds real ids: ${value}`,
-    parsed?.every((id) => id.startsWith('task_')),
-    value
-  )
-}
-check('ledger received an entry per dispatched task', ledgerExists)
-check(
-  'every ledger row carries a non-empty run id',
-  ledgerExists &&
-    readFileSync(ledgerPath, 'utf8')
-      .split('\n')
-      .filter((line) => line.trim() !== '')
-      .every((line) => JSON.parse(line).run === 'run_stub')
-)
-if (ledgerExists) {
-  const view = buildView(parseLedger(readFileSync(ledgerPath, 'utf8')))
-  const tasks = new Set(view.folded.tasks.map((task) => task.id))
-  check('ledger holds all five tasks', tasks.size === 5, [...tasks].join(','))
-  check('run id recorded', view.folded.run === 'run_stub', String(view.folded.run))
-  const dispatched = view.folded.tasks.filter((task) => task.dispatch)
-  check('four tasks carry a dispatch id', dispatched.length === 4, String(dispatched.length))
-  check(
-    'dispatch ids came from the receipt, not the placeholder',
-    dispatched.every((task) => task.dispatch?.startsWith('disp_')),
-    dispatched.map((task) => task.dispatch).join(',')
-  )
-  const waves = Object.fromEntries(view.folded.tasks.map((task) => [task.id, task.wave]))
-  check(
-    'waves resolved to implement / audit / merge',
-    JSON.stringify(waves) ===
-      JSON.stringify({ impl_a: 0, impl_b: 0, audit_a: 1, audit_b: 1, merge: 2 }),
-    JSON.stringify(waves)
+    'every dispatched role was started',
+    calls.filter((call) => call[1] === 'worker-start').length === 4
   )
   check(
-    'dependencies were captured, not left as plan names',
-    view.folded.tasks.find((task) => task.id === 'audit_a')?.deps.size === 1
+    'the merge wave became a gate, not an agent',
+    calls.filter((call) => call[1] === 'gate-create').length === 1
   )
+  // Verified live on orca 1.4.197: a worker-start without --from is fenced, and the first failure a
+  // real run sees is `selector_not_found` on the worktree selector, which blames the wrong flag. A
+  // stub that answers every command the same way would pass this file with the bug still in it, so
+  // the stub records the argv and this asserts the coordinator handle actually reached the binary.
+  const startCalls = calls.filter((call) => call[1] === 'worker-start')
+  check(
+    'every dispatch names the coordinator terminal from the run receipt',
+    startCalls.length > 0 &&
+      startCalls.every((call) => {
+        const at = call.indexOf('--from')
+        return at !== -1 && call[at + 1] === 'term_stub'
+      }),
+    startCalls.map((call) => call[call.indexOf('--from') + 1]).join(',')
+  )
+  check(
+    'no dispatch passes a literal $RUN_COORDINATOR',
+    startCalls.every((call) => !call.includes('$RUN_COORDINATOR'))
+  )
+
+  // The point of the exercise: --deps must carry the ids task-create actually returned, not the
+  // symbolic plan names, and must still be valid JSON after shell expansion.
+  const depArgs = calls
+    .filter((call) => call[1] === 'task-create')
+    .map((call) => call[call.indexOf('--deps') + 1])
+    .filter((value) => value !== '[]')
+  for (const value of depArgs) {
+    let parsed = null
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      failures.push(`--deps is not valid JSON after expansion: ${value}`)
+    }
+    check(
+      `--deps parses and holds real ids: ${value}`,
+      parsed?.every((id) => id.startsWith('task_')),
+      value
+    )
+  }
+  check('ledger received an entry per dispatched task', ledgerExists)
+  check(
+    'every ledger row carries a non-empty run id',
+    ledgerExists &&
+      readFileSync(ledgerPath, 'utf8')
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .every((line) => JSON.parse(line).run === 'run_stub')
+  )
+  if (ledgerExists) {
+    const view = buildView(parseLedger(readFileSync(ledgerPath, 'utf8')))
+    const tasks = new Set(view.folded.tasks.map((task) => task.id))
+    check('ledger holds all five tasks', tasks.size === 5, [...tasks].join(','))
+    check('run id recorded', view.folded.run === 'run_stub', String(view.folded.run))
+    const dispatched = view.folded.tasks.filter((task) => task.dispatch)
+    check('four tasks carry a dispatch id', dispatched.length === 4, String(dispatched.length))
+    check(
+      'dispatch ids came from the receipt, not the placeholder',
+      dispatched.every((task) => task.dispatch?.startsWith('disp_')),
+      dispatched.map((task) => task.dispatch).join(',')
+    )
+    const waves = Object.fromEntries(view.folded.tasks.map((task) => [task.id, task.wave]))
+    check(
+      'waves resolved to implement / audit / merge',
+      JSON.stringify(waves) ===
+        JSON.stringify({ impl_a: 0, impl_b: 0, audit_a: 1, audit_b: 1, merge: 2 }),
+      JSON.stringify(waves)
+    )
+    check(
+      'dependencies were captured, not left as plan names',
+      view.folded.tasks.find((task) => task.id === 'audit_a')?.deps.size === 1
+    )
+  }
+
+  // Only when invoked as a script. A test imports this file for STUB, and running the whole check on
+  // import would set process.exitCode out from under the runner — a mutation would then report as
+  // "no tests" rather than as the failure it is.
+  if (process.argv[1] && process.argv[1].endsWith('orchestration-generated-script-check.mjs')) {
+    process.stdout.write(`\n${failures.length === 0 ? 'PASS' : `FAIL (${failures.length})`}\n`)
+    for (const failure of failures) {
+      process.stdout.write(`  - ${failure}\n`)
+    }
+    process.exitCode = failures.length === 0 ? 0 : 1
+  }
 }
 
-process.stdout.write(`\n${failures.length === 0 ? 'PASS' : `FAIL (${failures.length})`}\n`)
-for (const failure of failures) {
-  process.stdout.write(`  - ${failure}\n`)
+if (process.argv[1] && process.argv[1].endsWith('orchestration-generated-script-check.mjs')) {
+  main()
 }
-process.exitCode = failures.length === 0 ? 0 : 1
