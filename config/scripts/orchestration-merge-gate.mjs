@@ -362,6 +362,7 @@ function doneInput(args) {
     outcome: asList(args.outcome).at(-1) ?? null,
     verdict: asList(args.verdict).at(-1) ?? null,
     report: asList(args.report).at(-1) ?? null,
+    branch: asList(args.branch).at(-1) ?? null,
     regression: parseRegression(args.regression),
     file: asList(args.file),
     finding: asList(args.finding),

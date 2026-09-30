@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildMergePlan, renderMerge } from './orchestration-merge-gate.mjs'
-import { computeMergeReadiness } from './orchestration-verdict-contract.mjs'
-import { buildView, parseLedger } from './orchestration-schedule-ledger.mjs'
+import { buildDoneEntry, computeMergeReadiness } from './orchestration-verdict-contract.mjs'
+import { buildView, normalizeEntry, parseLedger } from './orchestration-schedule-ledger.mjs'
 
 /**
  * Finding 17: buildMergePlan read a task's branch from `placement.base`, which is the branch it
@@ -13,9 +13,14 @@ import { buildView, parseLedger } from './orchestration-schedule-ledger.mjs'
  * the plan named every task's parent — halfking/test_a was never merged and halfking/impl_a-2 was
  * merged in its place, and the gate printed that plan with a clean ORDER beside it.
  *
+ * The last two cases here cover the writer side. `buildDoneEntry` builds the completion from an
+ * explicit field list, so a caller can pass `branch` all day and still get an entry the gate
+ * cannot plan from — and `record-done`, the command a coordinator is told to run, went through it.
+ * Fixing only the reader would have left the documented path silently dropping the field.
+ *
  * These live in their own file because the sibling test file was already near the repository's
- * 600-line cap, and the two tests that could not be expressed there — a two-link impl→test chain,
- * and a task with no landing branch — are the whole point.
+ * 600-line cap, and the cases that could not be expressed there — a two-link impl→test chain, a task
+ * with no landing branch, and the writer round trip — are the whole point.
  */
 const RUN = 'run_branch_test'
 
@@ -127,5 +132,52 @@ describe('merge plan branch resolution', () => {
     const readiness = computeMergeReadiness(viewOf([IMPL, AUDIT]).folded)
     expect(readiness.ready).toBe(true)
     expect(readiness.blockers).toEqual([])
+  })
+
+  it('keeps the branch a completion landed on, because the entry is built from a fixed field list', () => {
+    const entry = buildDoneEntry({
+      run: RUN,
+      task: 'impl_a',
+      role: 'implementer',
+      agent: 'opencode',
+      branch: 'feature/a',
+      finding: [],
+      file: ['src/a.ts'],
+      dep: []
+    })
+    expect(entry.branch).toBe('feature/a')
+    expect(normalizeEntry(entry).branch).toBe('feature/a')
+  })
+
+  it('records the branch through the record-done CLI, which is the path a coordinator actually uses', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-record-done-'))
+    const ledger = join(dir, 'ledger.jsonl')
+    const gate = join(import.meta.dirname, 'orchestration-merge-gate.mjs')
+
+    const written = execFileSync(
+      'node',
+      [
+        gate,
+        'record-done',
+        '--ledger',
+        ledger,
+        '--run',
+        RUN,
+        '--task',
+        'impl_a',
+        '--role',
+        'implementer',
+        '--agent',
+        'opencode',
+        '--branch',
+        'feature/a',
+        '--file',
+        'src/a.ts'
+      ],
+      { encoding: 'utf8' }
+    )
+    expect(written).toContain('recorded impl_a')
+    const folded = buildView(parseLedger(readFileSync(ledger, 'utf8')))
+    expect(folded.folded.tasks.find((task) => task.id === 'impl_a').branch).toBe('feature/a')
   })
 })

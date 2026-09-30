@@ -642,7 +642,40 @@ npx vitest run config/scripts/orchestration-*.test.mjs          # 我先报的�
 
 **判据**：「有测试」与「测试守住」之间还隔着「测试被执行」这一段，而这一段**完全静默**——接线没做时，本地绿、CI 绿、review 绿，只是从来没有任何一次提交会因它失败。**加守卫而不接线，是最常见的腐化方式，且不会留下任何痕迹。** 上表应当被视为待办：要么接进 CI，要么明确承认它们是手工门——两者都行，唯独不能默认它已经被覆盖。
 
-**这一轮没解决的**：缺陷 17 的 settle helper 取舍仍然悬着——全仓**没有任何自动 `worker-done` 写入方**（编译器 / 桩 / 四个驱动脚本各 0 次，账本行全为手工追加），所以 `branch` 缺失时 fail closed 会让手写账本全部无法合并。旧账本尚未补写 `branch`，真实 run 上仍会显示 `NOT PLANNED`。这个取舍需要人来定，不是一行代码的事。
+**这一轮先搞错了一件事，纠正后才发现真正的洞。** 上一轮我写"全仓没有任何自动 `worker-done` 写入方"，依据是编译器 / 桩 / 四个驱动脚本各 0 次命中。这个结论**是错的**——写入方有两个，而且一直都在：
+
+| 写入方 | 入口 | 契约校验 | 能带 `branch` 吗 |
+| --- | --- | --- | --- |
+| `orchestration-schedule-ledger.mjs record` | `--entry/--stdin/--receipts` | 无 | **能**（通用 JSON 透传） |
+| `orchestration-merge-gate.mjs record-done` | 逐字段 flag | 有（`buildDoneEntry` 校验裁决/报告/回归） | **不能**——修之前 |
+
+错在哪：我的 grep 只搜了"谁自动调用它"，没有搜"谁**提供**写入能力"。前者为 0 不代表写入方不存在，只代表**没接进派发流**。**一个 0 至少要问两次它到底在数什么。**
+
+**而这条纠正直接挖出了一个真的洞。** `record-done` 是协调者按文档会用的那条命令，它走 `doneInput()` + `buildDoneEntry()`——两处都是**白名单式**构造字段，`branch` 都不在里面：
+
+```js
+// orchestration-verdict-contract.mjs，buildDoneEntry
+reportPath: input.report ?? null,
+filesModified: input.file,     // ← 没有 branch
+```
+
+后果比"少个字段"更糟：**传了也不报错，直接被丢掉。** 也就是说缺陷 17 的修法在官方路径上是**不可用的**——协调者老老实实走 `record-done`，branch 被静默吞掉，门继续报 `NOT PLANNED`，而所有人都会以为"我已经记了"。
+
+**判据**：**一个白名单式构造函数，会把"调用方传了但你没接"这件事变成静默。** 逐字段构造的好处是不给字段留模糊空间，代价是新增字段必须同时改三处（构造、CLI 解析、契约）——而**漏改的失败模式是沉默的**。凡是逐字段构造的形状，**每个字段都要有一条"我传了它、它真的到了"的测试**。
+
+修法：`doneInput()` 与 `buildDoneEntry()` 各加一行 `branch`，两条测试分别守住两层。变异验证——丢掉 `buildDoneEntry` 里的 `branch` → **红 2**（含 CLI 那条）；让 `doneInput` 不转发 → **红 1**（只有 CLI 那条红，两层独立）。
+
+**"回填 branch 后计划对不对"已用真实账本实测**（`.p4-evidence/35-merge-plan-with-branch.txt`，可由 `backfill-branch.mjs` 复现）。修复前每行都是父分支、`halfking/test_a` 根本不在计划里；回填后：
+
+```text
+ORDER
+  1. impl_a         halfking/impl_a-2
+  2. test_a         halfking/test_a
+  3. impl_b         halfking/impl_b     | shares files with test_b
+  4. test_b         halfking/test_b2    | shares files with impl_b
+```
+
+**仍未解决、且仍然需要人来定的只剩一件**：真实 run 里**没有人自动调 `record-done`**，所以真实账本的 `branch` 依然是空的。这次解决的是"**能不能记**"，不是"**谁来记**"——派发流要不要在 worker settle 时自动调 `record-done`、branch 从 worker 自报还是从 `worker-start` 的落点取，是设计决策，不是机械改动。
 
 **风险与边界**
 

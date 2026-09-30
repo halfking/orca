@@ -285,6 +285,11 @@ export function buildDoneEntry(input) {
     findings,
     regression,
     reportPath: input.report ?? null,
+    // Where the work landed, which placement.base cannot answer: base is where the task forked
+    // from. Without this the merge gate has no field to plan a merge from, and it fails closed.
+    // This entry is built from an explicit field list, so an unlisted field is dropped silently --
+    // a caller can pass `branch` all day and still get a completion that cannot be merged.
+    branch: input.branch ?? null,
     filesModified: input.file,
     deps: input.dep
   }

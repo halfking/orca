@@ -1,0 +1,50 @@
+# 35 — the merge plan once the ledger records where each task landed
+
+Reproduce: `node .p4-evidence/backfill-branch.mjs`
+
+Ledger: the real P4 run (`.orca/orchestration-ledger/run_f8f2a6573946.jsonl`), copied, with
+`branch` backfilled onto each `worker-done` row. Nothing in the original ledger recorded it —
+`placement.base` holds the branch a task forked FROM, which is a different branch. 5 rows
+backfilled, 12 rows total.
+
+The two audit verdicts are SYNTHETIC. Wave 2 never ran (no independent agent was available), so
+`audit_a` / `audit_b` do not exist. They are here only to open the gate and expose the ORDER, which
+is what this file measures. Nothing was audited.
+
+`worktree DIRTY — refusing to merge` is this repository's own uncommitted work at capture time; it
+is the guard working. `merge` was run WITHOUT `--execute`, which prints the plan and returns. No
+merge was performed, here or anywhere.
+
+## Before the fix, this same run produced (docs §4.7.9):
+
+  1. impl_a   pilot/p4-two-task-pilot
+  2. test_a   halfking/impl_a-2
+  3. impl_b   pilot/p4-two-task-pilot
+  4. test_b   halfking/impl_b
+
+Every line was the parent branch, and `halfking/test_a` was never in the plan at all.
+
+backfilled 5 worker-done rows; 12 rows total -> /Users/xutaohuang/workspace/ai/orca-wt-orca2/.p4-evidence/merge-plan-ledger.jsonl
+
+$ node config/scripts/orchestration-merge-gate.mjs verify --ledger <backfilled> --repo . --base origin/main
+AUDIT VERDICTS
+  audit_a        pass                 findings=0 reports=1 tested=yes
+  audit_b        pass                 findings=0 reports=1 tested=yes
+
+MERGE GATE: OPEN
+
+$ node config/scripts/orchestration-merge-gate.mjs merge --ledger <backfilled> --repo . --base origin/main
+merge gate is closed; nothing was merged
+MERGE PLAN  base=origin/main  repo=/Users/xutaohuang/workspace/ai/orca-wt-orca2
+  worktree DIRTY — refusing to merge
+  gate OPEN
+
+ORDER
+  1. impl_a         halfking/impl_a-2            behind 41
+  2. test_a         halfking/test_a              behind 41
+  3. impl_b         halfking/impl_b              behind 41 | shares files with test_b
+  4. test_b         halfking/test_b2             behind 41 | shares files with impl_b
+
+CONFLICTS NEED AN OWNER
+  impl_b <-> test_b: config/scripts/orchestration-merge-gate.test.mjs
+merge gate is closed; nothing was merged

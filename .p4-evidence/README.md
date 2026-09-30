@@ -14,6 +14,14 @@ Plan: `../p4-pilot-plan.json`. Findings: `docs/reference/parallel-task-orchestra
 > ledger rows are hand-appended and no automatic `worker-done` writer exists anywhere in the repo — so
 > the real run now correctly reports `NOT PLANNED` for every task. That is the gate working, not a
 > regression. Deciding who fills `branch` is the open design question in `finding-17-proposed-fix.md`.
+>
+> **Correction (round 5, 2026-10-01):** the second sentence above is wrong. Writers do exist —
+> `orchestration-schedule-ledger.mjs record` and `orchestration-merge-gate.mjs record-done` — they are
+> just not called from the dispatch flow. And `record-done` used to **silently drop** `branch`, which
+> made the round-4 fix unusable through the documented path. That is fixed and guarded. What is still
+> open is narrower: whether the settle path should call `record-done` automatically. See
+> `35-merge-plan-with-branch.txt` for the plan with `branch` backfilled — it is correct now, and
+> `halfking/test_a` is in it.
 
 ## What ran
 
@@ -58,6 +66,8 @@ were duplicates of coverage impl_b had already shipped. Both rejections are in t
 | `repro-branch-resolution.mjs`                                          | finding 17, in two lines of output; exits 0 on the bug                              |
 | `resolve-branch-from-repo.mjs`                                         | the cheap fix (infer the branch from git) measured and rejected                      |
 | `finding-17-proposed-fix.md`                                           | the fix shape, its cost, and the design question left open                          |
+| `35-merge-plan-with-branch.txt`                                         | the same run with `branch` recorded: correct ORDER, `halfking/test_a` in it        |
+| `backfill-branch.mjs`                                                   | rebuilds that ledger and prints the plan; run it to reproduce the file above       |
 
 Taken together: the merge machinery is sound in both directions and is fed one wrong ref.
 
