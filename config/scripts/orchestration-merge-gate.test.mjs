@@ -61,7 +61,12 @@ const IMPL_A = {
   event: 'worker-done',
   state: 'completed',
   filesModified: ['src/a.ts'],
-  placement: { worktree: 'task-a', base: 'feature/a', isolation: 'worktree' }
+  // `base` is where the task forked FROM and `branch` is where it landed ON. They are different
+  // refs and conflating them made buildMergePlan merge every task's parent: halfking/test_a would
+  // never be merged and halfking/impl_a-2 would be merged in its place. Reproduced live on the
+  // P4 pilot; the plan printed the base column, not the landing branch.
+  branch: 'feature/a',
+  placement: { worktree: 'task-a', base: 'main', isolation: 'worktree' }
 }
 
 const IMPL_B = {
@@ -70,7 +75,8 @@ const IMPL_B = {
   agent: 'claude',
   model: 'cheap',
   filesModified: ['src/b.ts'],
-  placement: { worktree: 'task-b', base: 'feature/b', isolation: 'worktree' }
+  branch: 'feature/b',
+  placement: { worktree: 'task-b', base: 'main', isolation: 'worktree' }
 }
 
 describe('audit verdict contract', () => {
@@ -447,8 +453,8 @@ describe('merge execution against a real repository', () => {
     }
   })
 
-  function featureBranch(name, files) {
-    git(['checkout', '-b', name])
+  function featureBranch(name, files, from = 'main') {
+    git(['checkout', '-b', name, from])
     for (const [path, content] of Object.entries(files)) {
       write(path, content)
     }

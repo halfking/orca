@@ -127,7 +127,13 @@ export function inspectRepository(repo, base, branches) {
  */
 export function buildMergePlan(view, repo, base) {
   const readiness = computeMergeReadiness(view.folded)
-  const branchOf = (id) => view.folded.tasks.find((task) => task.id === id)?.placement?.base ?? null
+  // The branch to merge is the one the task's work LANDED on, never the one it forked from. This
+  // read `placement.base`, so a five-wave run merged every task's parent: the test branch was
+  // never merged and the implementation branch was merged in its place. There is deliberately no
+  // fallback to placement.base — that fallback is the defect, and a wrong branch merges cleanly and
+  // quietly, which is worse than a plan that refuses.
+  const branchOf = (id) => view.folded.tasks.find((task) => task.id === id)?.branch ?? null
+  const unplaced = view.order.filter((id) => branchOf(id) === null)
   const ordered = view.order
     .map((id) => {
       const task = view.folded.tasks.find((candidate) => candidate.id === id)
@@ -174,7 +180,10 @@ export function buildMergePlan(view, repo, base) {
     inspection,
     conflicts,
     steps,
-    ready: readiness.ready && inspection.worktreeClean
+    // A task that never recorded a landing branch cannot be merged safely, so it blocks the plan
+    // rather than being dropped from it. Silently dropping it is how a test branch disappears.
+    unplaced,
+    ready: readiness.ready && inspection.worktreeClean && unplaced.length === 0
   }
 }
 
@@ -271,6 +280,14 @@ export function renderMerge(plan, repo) {
   lines.push(`  gate ${plan.readiness.ready ? 'OPEN' : 'CLOSED'}`)
   lines.push('')
   lines.push('ORDER')
+  // Named here rather than only folded into `gate CLOSED`, because a task missing from ORDER with
+  // no line of its own is indistinguishable from a task that was never meant to merge.
+  if (plan.unplaced.length > 0) {
+    lines.push(
+      `  NOT PLANNED — no landing branch recorded: ${plan.unplaced.join(', ')}` +
+        ' (record "branch" on its worker-done entry)'
+    )
+  }
   for (const step of plan.steps) {
     const flags = [
       step.alreadyMerged ? 'already-merged' : null,

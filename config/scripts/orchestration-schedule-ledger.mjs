@@ -45,6 +45,10 @@ export function normalizeEntry(raw) {
     model: raw.model ?? null,
     effort: raw.effort ?? null,
     placement: raw.placement ?? null,
+    // The branch this task's work landed on. Distinct from placement.base, which is the branch it
+    // forked from. Nothing in the tree recorded the landing branch until this field existed, and
+    // buildMergePlan therefore merged every task's parent.
+    branch: raw.branch ?? null,
     state: raw.state ?? null,
     stage: raw.stage ?? null,
     liveness: raw.liveness ?? null,
@@ -119,6 +123,7 @@ export function foldLedger(entries) {
         model: null,
         effort: null,
         placement: null,
+        branch: null,
         state: 'pending',
         dispatch: null,
         runtimeTaskId: null,
@@ -159,6 +164,9 @@ export function foldLedger(entries) {
     }
     if (entry.placement) {
       task.placement = entry.placement
+    }
+    if (entry.branch) {
+      task.branch = entry.branch
     }
     if (entry.state) {
       task.state = entry.state
