@@ -235,6 +235,8 @@ function buildAgentResumeInvocation(
       return `${baseCommand} --resume ${sessionArg}`
     case 'antigravity':
       return `${baseCommand} --conversation ${sessionArg}`
+    case 'zcode':
+      return `${baseCommand} --resume ${sessionArg}`
   }
 }
 

@@ -400,7 +400,7 @@ describe('scanAiVaultSessions', () => {
       await writeEveryAgentVault(root)
     await writeMuseScannerFixture(roots.museSessionsDir)
 
-    const result = await scanAiVaultSessions({ ...roots, platform: 'darwin', limit: 20 })
+    const result = await scanAiVaultSessions({ ...roots, platform: 'darwin', limit: 50 })
 
     expect(result.issues).toEqual([])
     expect(new Set(result.sessions.map((session) => session.agent))).toEqual(
@@ -451,6 +451,9 @@ describe('scanAiVaultSessions', () => {
     expect(commandByAgent.get('muse')).toBe("cd '/tmp/muse' && muse resume 'muse-session'")
     expect(commandByAgent.get('kimi')).toBe(
       "cd '/tmp/kimi' && kimi --session 'session_kimi-session'"
+    )
+    expect(commandByAgent.get('zcode')).toBe(
+      "cd '/tmp/zcode' && zcode --resume 'sess_zcode-session'"
     )
 
     const ompSession = result.sessions.find((session) => session.agent === 'omp')

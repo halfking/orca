@@ -41,6 +41,7 @@ export type AiVaultScanOptions = {
   clineSessionsDir?: string
   kimiSessionsDir?: string
   museSessionsDir?: string
+  zcodeAgentsDir?: string
   limit?: number
   unlimited?: boolean
   limitPerAgent?: number

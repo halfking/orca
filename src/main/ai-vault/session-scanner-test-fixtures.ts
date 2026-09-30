@@ -76,7 +76,10 @@ export function isolatedScanRoots(root: string) {
     droidProjectsDir: join(root, 'droid-projects'),
     clineSessionsDir: join(root, 'cline-sessions'),
     kimiSessionsDir: join(root, 'kimi-sessions'),
-    museSessionsDir: join(root, 'muse-sessions')
+    museSessionsDir: join(root, 'muse-sessions'),
+    // Why: empty zcode agents root prevents tests from leaking the user's
+    // real ~/.zcode/cli/agents/ into fixtures-scoped scans.
+    zcodeAgentsDir: join(root, 'zcode-agents')
   }
 }
 
@@ -263,4 +266,45 @@ export async function writeMuseScannerFixture(sessionsDir: string): Promise<stri
     }
   ])
   return sessionFile
+}
+
+// ZCode sessions live at <root>/sess_<UUID>/agent_<UUID>/{metadata.json,output.txt}.
+// The scanner surfaces one row per `sess_<UUID>` by picking the most recent agent's
+// metadata. The fixture below writes a single-session, single-agent layout so the
+// every-agent coverage test gets exactly one zcode row.
+export async function writeZcodeScannerFixture(agentsDir: string): Promise<string> {
+  // Why: ZCode's on-disk naming uses the `sess_` prefix as the scanner's session
+  // boundary marker. Anything else is silently skipped so unrelated sidecar
+  // directories (e.g. `rules/`, `db/`) never surface as sessions.
+  const sessionId = 'sess_zcode-session'
+  const agentDir = join(agentsDir, sessionId, 'agent_zcode-session')
+  await mkdir(agentDir, { recursive: true })
+  const metadataPath = join(agentDir, 'metadata.json')
+  await writeFile(
+    metadataPath,
+    JSON.stringify(
+      {
+        agentId: 'agent_zcode-session',
+        parentSessionId: sessionId,
+        prompt: 'ZCode vault title',
+        status: 'completed',
+        workspaceRoot: '/tmp/zcode',
+        model: 'account:bigmodel-individual-coding-plan/GLM-5.3',
+        createdAt: '2026-05-01T10:00:00.000Z',
+        updatedAt: '2026-05-01T10:00:05.000Z',
+        completedAt: '2026-05-01T10:00:05.000Z',
+        totalToolUseCount: 1,
+        totalTokens: 60,
+        usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 },
+        profileSnapshot: { name: 'Explore' }
+      },
+      null,
+      2
+    )
+  )
+  await writeFile(
+    join(agentDir, 'output.txt'),
+    'ZCode answer spans 3 tool calls.\nEvery line of every turn.\n'
+  )
+  return metadataPath
 }

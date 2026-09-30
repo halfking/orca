@@ -82,6 +82,7 @@ function resumableStateFactoryFor(
     case 'opencode':
     case 'opencode2':
     case 'rovo':
+    case 'zcode':
       return null
   }
 }

@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-09-23T07:41:58.671Z",
+  "platform": "darwin",
+  "command": ["zcode"],
+  "cols": 120,
+  "rows": 32,
+  "note": "ZCode 0.16.9 CLI TUI, empty git folder, no model configured. Banner-only slice of zcode-composer-ready.txt: first 6 KiB cut at a byte-exact escape boundary right after the initial header/sidebar/composer paint cycle. Use this fixture when a test only needs the banner row to be present — it avoids pulling in the ~200 KiB of continuing repaint noise. ZCode emits no OSC title.",
+  "exitCode": 129,
+  "truncated": true,
+  "slicedFrom": "zcode-composer-ready.txt",
+  "slicedBytes": 6144
+}
