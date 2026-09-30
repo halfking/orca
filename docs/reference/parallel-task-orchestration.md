@@ -446,6 +446,8 @@ P2/P3 的"已验证"全部是**桩验证**。P4 在真 Orca（`/Applications/Orc
 | 3 | `claude` 没有预信任预设                                                | 每个 claude worker 停在首次启动的信任弹窗，dispatch 死在 `agent_readiness` | 桩不启动 agent，弹窗不存在                             | `preflightTrust: 'claude'`，只写 `~/.claude.json` 的 `hasTrustDialogAccepted` |
 | 4 | 桩自造 `run-create` 收据形状                                          | Run 开了、worker 派出去了，然后每条账本记录都失败（`run` 为空）          | 桩答的是 `{result:{id}}`，真实是 `{result:{run:{id}}}`   | 桩按真实收据作答 + 断言每行 `run` 非空           |
 
+> **审计修正（2026-10-01，见 §4.7.10）**：本节第 2、4 行的"修法"当时**只有实现、没有守卫**。`orchestration-argv-contract-check.mjs` 与 `orchestration-generated-script-check.mjs` 既没有测试文件，也不在 `pnpm test` 或任何 CI workflow 里——把它们退回修复前的状态，测试套件全绿。表中"为什么检查没抓到"一列对这两条是成立的，但整节读起来像"修完即有回归保护"，那是错的。
+
 **还有一个不是本仓库的**：opencode 的 `bash`/`edit` 权限默认 `ask`，而 supervised worker 没人值守，于是每个 worker 卡在自己的权限弹窗上。和缺陷 3 同源——**任何"必须有人在终端里点一下"的首次启动流程，都会让 supervised 派发停在 `agent_readiness`**。本次由协调者代答"Allow always"（opencode 侧的措辞是"until OpenCode is restarted"，即会话级，不是全局配置）。
 
 **关于第 1 条，值得单独记住**：报错信息指向 `--worktree` 的 selector，而真正的原因是命令从头到尾没有指名 Run 的协调者。`worker-start` 被 fence 在绑定到该 Run 的终端上，`--worktree new-child` 又要通过同一个绑定去解析协调者工作区。同一条 argv 加 `--from` 就起得来，不加就失败——**一个指错位置的错误信息，比错误本身更贵**。
@@ -589,9 +591,38 @@ MERGE PLAN when placement.base means "landed on" (what the test fixtures emit):
 
 **判据**：一份门禁测试的夹具，如果它的字段含义是**照着实现写的**，那它测的是"实现和自己的假设一致"，不是"实现对"。**先问这个字段在真实写入方眼里是什么意思**，再问夹具怎么填的。
 
-**修法的形状**（尚未落地，因为它有一个需要人来定的问题）：`normalizeEntry` 加 `branch` 字段，`foldLedger` 透传，`branchOf` 改读它；**并且在 `branch` 缺失时必须 fail closed，而不是回落到 `placement.base`**——回落到今天这个字段，正是这个缺陷的成因。缺失时该报什么、写 `worker-done` 时谁负责填它，都是要先定下来的设计问题，不是顺手改一行。
+**修法的形状（已落地，见 §4.7.10；本段的取舍过程保留在此）**：`normalizeEntry` 加 `branch` 字段，`foldLedger` 透传，`branchOf` 改读它；**并且在 `branch` 缺失时必须 fail closed，而不是回落到 `placement.base`**——回落到今天这个字段，正是这个缺陷的成因。缺失时该报什么、写 `worker-done` 时谁负责填它，都是要先定下来的设计问题，不是顺手改一行。
 
 **另一条边界（实测，非推断）**：worker 终端的环境**不是**从派发里注入的。`buildAgentStartupPlan` 只在 `args.agentEnv` 存在时带上 `env`（`src/shared/tui-agent-startup.ts:95`），而 `agentEnv` 来自 `resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv)`（`src/shared/agent-startup-plan-inputs.ts:60`）——**Orca 的应用设置**，不是账本派发。所以"用环境变量绕开一份坏的用户配置"在派发链上不成立：临时 `XDG_CONFIG_HOME` 能让命令行探测通过，worker 终端仍会读用户那份原配置。真正的出口是 Orca 设置里的 `agentDefaultEnv.opencode`，那是应用级设置、影响所有 opencode 终端。
+
+#### 4.7.10 P4 第四轮：不采信上一轮"已修"，逐条做变异验证
+
+前三节的叙述有一个共同的毛病：**修法写得像完成了，但没人核过"修完的东西有没有被守住"**。这一轮把已推上 `origin/main` 的 5 个提交逐条查守卫，查出 3 条是"只是声明"——代码改了、文档写了，但没有任何测试会在它退回原状时变红。
+
+**方法**：每条修法先写测试，再**故意把代码退回修复前的状态**，确认门真的会红。绿不算数，红才算数。
+
+| 缺陷 / 字段 | 上一轮的状态 | 变异结果 | 这一轮的补法 |
+| --- | --- | --- | --- |
+| 缺陷 17（`branchOf` 读错字段） | 已修，但夹具本身是错的 | 夹具改成 fork-from 语义后**红 9 例** | `branch` 字段 + fail closed + 2 条回归；变异退回 `placement.base` **红 3 例**；去掉 `unplaced` 计入 `ready` **红 1 例** |
+| 缺陷 2（argv UNVERIFIED fail-closed） | **无测试文件、无自证、CI 不跑** | `UNVERIFIED` 改回 `ACCEPTED`，32 例全绿 | 抽出 `argvCheckExitCode` / `classifyProbeResult` 为导出纯函数 + 新建 `orchestration-argv-contract-check.test.mjs`（11 例）；变异分类器 **红 2 例** |
+| 缺陷 4（桩收据形状） | 只有 `verify:` 脚本能抓，`pnpm test` 不跑 | 桩退回 `{result:{id}}`，测试套件**察觉不到** | 导出 `STUB` + 把执行体包进 `main()` + 新建 `orchestration-run-create-receipt-shape.test.mjs`（4 例，真实执行桩）；变异 **红 4 例** |
+| `runtimeTaskId` 回读 | 从未被断言 | 置 `null`，19 例全绿 | 在 `orchestration-schedule-ledger.test.mjs` 加 2 例（`runtimeTaskId` 与 `branch` 回读）；变异各 **红 1 例** |
+
+**顺带修掉的一个真 bug**：argv 检查在 probe 数组为空时返回 **0**（fail-open）——正是缺陷 2 自己要消灭的形状，只是换了层。现在返回 1。
+
+**这一轮最该记住的是变异暴露出的三件事：**
+
+1. **门全绿和门覆盖我，是两件事。** 三个空缺里有两个（缺陷 2、缺陷 4）的测试文件**根本不存在**。上一轮我核对的是"有测试、有覆盖"，没有做的是"退回原状看它会不会红"——而只有后者能区分"守住了"和"只是写下来了"。
+
+2. **export 出来之前，一个纯函数没法被测。** `classifyProbeResult` 和桩 `STUB` 都是包在执行体里的：不导出就只能靠 import 整个模块去触发副作用，而副作用一旦在变异时抛异常，测试框架报的是 **`Tests no tests`**——和缺陷 8（test_b 把 vitest 改写成 `node:test`）**完全同族**。一个"文件跑起来一个用例都没跑"的现象，既可能是 runner 写错，也可能是 import 侧效应炸了，两者的修法不同，别混为一谈。
+
+3. **夹具会替实现说谎，而且夹具自己可以被守卫。** 缺陷 17 的夹具把 `placement.base` 填成落地分支，正是实现的误解。把它改成 fork-from 语义，门当场红 9 例——**修好夹具比修好代码更需要先看一眼**。
+
+**一条顺带的工程约束**：`orchestration-merge-gate.test.mjs` 曾经 604 有效行，顶破 `.oxlintrc.json` 对 `**/*.mjs` 的 `max-lines: 600`（与缺陷 14 同一堵墙）。分支解析那 4 例拆到新文件 `orchestration-merge-gate-branch.test.mjs`，原文件回到 562 行。**每加一批测试都要先问它会不会把某个文件顶破上限**，因为上限破了之后最省事的动作是豁免，而豁免会把门变成装饰。
+
+**当前门禁**：`config/scripts/orchestration-*.test.mjs` 共 10 个文件 / 153 例全绿；`oxlint config/scripts/ src/main/agent-trust-presets.ts` 无输出；`verify:orchestration-generated-script` PASS；`verify:orchestration-argv-contract` schema 7/7（probe 需 `--live`，未跑）。
+
+**这一轮没解决的**：缺陷 17 的 settle helper 取舍仍然悬着——全仓**没有任何自动 `worker-done` 写入方**（编译器 / 桩 / 四个驱动脚本各 0 次，账本行全为手工追加），所以 `branch` 缺失时 fail closed 会让手写账本全部无法合并。旧账本尚未补写 `branch`，真实 run 上仍会显示 `NOT PLANNED`。这个取舍需要人来定，不是一行代码的事。
 
 **风险与边界**
 

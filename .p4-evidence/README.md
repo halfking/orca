@@ -1,7 +1,19 @@
 # P4 pilot — where this stands
 
 Run: `run_f8f2a6573946`. Ledger: `../.orca/orchestration-ledger/run_f8f2a6573946.jsonl`.
-Plan: `../p4-pilot-plan.json`. Findings: `docs/reference/parallel-task-orchestration.md` §4.7.7–4.7.9.
+Plan: `../p4-pilot-plan.json`. Findings: `docs/reference/parallel-task-orchestration.md` §4.7.7–4.7.10.
+
+> **Round 4 (2026-10-01) — finding 17 is fixed in code, and three earlier "fixes" turned out to be
+> unguarded.** The merge gate now reads a `branch` field, fails closed when it is absent, and names
+> every unplanned task as `NOT PLANNED` instead of dropping it from the order. Alongside it, three
+> gaps were found by deliberately reverting each fix and checking whether anything turned red:
+> finding 2, finding 4, and the `runtimeTaskId` read-back all had **no test at all**. All three now
+> have mutation-verified tests. Details: §4.7.10.
+>
+> **Still do not run `merge --execute` against the real ledger.** Nothing writes `branch` yet — the
+> ledger rows are hand-appended and no automatic `worker-done` writer exists anywhere in the repo — so
+> the real run now correctly reports `NOT PLANNED` for every task. That is the gate working, not a
+> regression. Deciding who fills `branch` is the open design question in `finding-17-proposed-fix.md`.
 
 ## What ran
 
