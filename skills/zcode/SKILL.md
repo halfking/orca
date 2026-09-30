@@ -28,8 +28,8 @@ Choose the executable once and reuse it for every later command:
 - Otherwise, use `orca`.
 
 Below, `ORCA` is a placeholder for the executable you resolved. Substitute it before
-running anything; do not create a shell variable or run `ORCA` literally. This works
-the same way in POSIX shells, PowerShell, and cmd.exe.
+running anything; do not create a shell variable or run `ORCA` literally. This works the
+same way in POSIX shells, PowerShell, and cmd.exe.
 
 If the selected executable cannot run, report its exact error and stop. Do not fall through
 to another executable, which could silently target a different Orca build.

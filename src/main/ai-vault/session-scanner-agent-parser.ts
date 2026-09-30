@@ -7,6 +7,7 @@ import { parseGrokSessionFile } from './session-scanner-grok-parser'
 import { parseMessageGraphSessionFile, parseRovoSessionFile } from './session-scanner-graph-parsers'
 import { parseKimiSessionFile } from './session-scanner-kimi-parser'
 import { parseMuseSessionFile } from './session-scanner-muse-parser'
+import { parseZCodeSessionFile } from './session-scanner-zcode-parser'
 import { splitOpenCodeSqliteCandidate } from './session-scanner-opencode-sqlite-paths'
 import {
   captureOpenCodeSqliteSessionViaWorker,
@@ -141,5 +142,7 @@ export async function parseAgentSessionFile(
       return parseKimiSessionFile(candidate.file, platform, messages)
     case 'muse':
       return parseMuseSessionFile(candidate.file, platform, messages)
+    case 'zcode':
+      return parseZCodeSessionFile(candidate.file, platform, messages)
   }
 }
