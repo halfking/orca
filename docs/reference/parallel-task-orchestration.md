@@ -622,6 +622,26 @@ MERGE PLAN when placement.base means "landed on" (what the test fixtures emit):
 
 **当前门禁**：`config/scripts/orchestration-*.test.mjs` 共 10 个文件 / 153 例全绿；`oxlint config/scripts/ src/main/agent-trust-presets.ts` 无输出；`verify:orchestration-generated-script` PASS；`verify:orchestration-argv-contract` schema 7/7（probe 需 `--live`，未跑）。
 
+**这一轮差点重复它自己刚发现的错误。** 上面每个测试文件都验证过"退回原状会红"，但**没人问过"它会不会真被跑"**。自查结果是：会——但我第一次自查时用的命令是错的。
+
+```text
+npx vitest run config/scripts/orchestration-*.test.mjs          # 我先报的那条
+→ 走默认配置，不带那三个 setupFiles，不是 pnpm test 会走的路径
+```
+
+**接线链（逐段核实）**：`config/vitest.config.ts` 的 `include` 含 `config/scripts/**/*.test.mjs` → `unit-tests.yml:49` 跑**全套**（只有 `--exclude` 列表，其中 `config/scripts` 出现 **0** 次）并按 8 个 shard 切分 → 由 `pr.yml:610` 触发。用真实 config 重跑 `npx vitest run --config config/vitest.config.ts config/scripts/orchestration-`，10 文件 / 153 例通过。
+
+**但仍有一类门没有接线，必须点名列出来**：
+
+| 门 | 在 `pnpm test` | 在 CI | 备注 |
+| --- | --- | --- | --- |
+| `orchestration-*.test.mjs`（本轮 4 个文件） | 是 | 是（8 shard 之一） | 已核实 |
+| `verify:orchestration-generated-script` | 否 | **否**（`.github/` 中 0 次命中） | 纯手工；其核心逻辑已被 `orchestration-run-create-receipt-shape.test.mjs` 覆盖，但**脚本自身的 argv/退出码行为**仍只靠手跑 |
+| `verify:orchestration-argv-contract` | 否 | **否** | 同上；且 `--live` 探针**从未跑过**（它会创建真实 Task） |
+| `verify:orchestration-ledger-concurrency` | 否 | **否** | 压测，耗时大概是被排除在 CI 之外的原因 |
+
+**判据**：「有测试」与「测试守住」之间还隔着「测试被执行」这一段，而这一段**完全静默**——接线没做时，本地绿、CI 绿、review 绿，只是从来没有任何一次提交会因它失败。**加守卫而不接线，是最常见的腐化方式，且不会留下任何痕迹。** 上表应当被视为待办：要么接进 CI，要么明确承认它们是手工门——两者都行，唯独不能默认它已经被覆盖。
+
 **这一轮没解决的**：缺陷 17 的 settle helper 取舍仍然悬着——全仓**没有任何自动 `worker-done` 写入方**（编译器 / 桩 / 四个驱动脚本各 0 次，账本行全为手工追加），所以 `branch` 缺失时 fail closed 会让手写账本全部无法合并。旧账本尚未补写 `branch`，真实 run 上仍会显示 `NOT PLANNED`。这个取舍需要人来定，不是一行代码的事。
 
 **风险与边界**
