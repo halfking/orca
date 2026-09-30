@@ -7,33 +7,8 @@ vi.mock('./codex-home-paths', () => ({
   getSystemCodexHomePath: () => process.env.CODEX_TEST_HOME ?? '/tmp/codex-test'
 }))
 
-const {
-  applyCodexKaixuanPreset,
-  applyCodexProvider,
-  renderCodexConfigForProvider,
-  readActiveCodexKaixuanPreset,
-  readActiveCodexProvider
-} = await import('./codex-apply-provider-preset')
-const { KAIXUAN_PRESETS, BUILT_IN_PROVIDER_IDS } =
-  await import('../../shared/provider-preset-types')
-import type { ProviderPresetDefinition } from '../../shared/provider-preset-types'
-
-// A custom provider used in the v4 tests. Mirrors the GLM-5.2 setup in
-// docs/site/content/docs/agents/glm-agent.mdx so the test exercises the same
-// shape real users will save through the AccountsPane form.
-const GLM_PROVIDER: ProviderPresetDefinition = {
-  id: 'glm-5.2',
-  label: 'GLM 5.2 (Z.AI)',
-  modelProviderName: 'glm-5.2',
-  codexProviderName: 'GLM 5.2 (Z.AI)',
-  codexBaseUrl: 'https://api.z.ai/api/coding/paas/v4',
-  claudeBaseUrl: 'https://api.z.ai/api/coding/paas/v4',
-  opencodeBaseUrl: 'https://api.z.ai/api/coding/paas/v4',
-  envKeyName: 'OPENAI_API_KEY',
-  opencodeModelIds: ['glm-5.2']
-}
-
-const KNOWN_BUILT_IN_AND_GLM = new Set<string>([...BUILT_IN_PROVIDER_IDS, 'glm-5.2'])
+const { applyCodexKaixuanPreset, renderCodexConfigForPreset, readActiveCodexKaixuanPreset } =
+  await import('./codex-apply-provider-preset')
 
 describe('codex-apply-provider-preset', () => {
   let workingHome: string
@@ -46,13 +21,11 @@ describe('codex-apply-provider-preset', () => {
     delete process.env.CODEX_TEST_HOME
   })
 
-  // --- v1–v3 behaviour kept green for the existing wrapper ---
-
   it('writes a model_provider + [model_providers.kaixuan-local] table on apply', () => {
     const configPath = join(workingHome, 'config.toml')
     const result = applyCodexKaixuanPreset('kaixuan-local')
     expect(result.error).toBeNull()
-    expect(result.providerId).toBe('kaixuan-local')
+    expect(result.presetId).toBe('kaixuan-local')
     expect(result.configPath).toBe(configPath)
     const written = readFileSync(configPath, 'utf-8')
     expect(written).toContain('model_provider = "kaixuan-local"')
@@ -116,135 +89,9 @@ describe('codex-apply-provider-preset', () => {
     expect(readActiveCodexKaixuanPreset('[model_providers.openai]\n')).toBeNull()
   })
 
-  it('renderCodexConfigForProvider is idempotent across repeated applies', () => {
-    const once = renderCodexConfigForProvider(
-      '',
-      KAIXUAN_PRESETS['kaixuan-local'],
-      BUILT_IN_PROVIDER_IDS
-    )
-    const twice = renderCodexConfigForProvider(
-      once,
-      KAIXUAN_PRESETS['kaixuan-local'],
-      BUILT_IN_PROVIDER_IDS
-    )
+  it('renderCodexConfigForPreset is idempotent across repeated applies', () => {
+    const once = renderCodexConfigForPreset('', 'kaixuan-local')
+    const twice = renderCodexConfigForPreset(once, 'kaixuan-local')
     expect(twice).toBe(once)
-  })
-
-  // --- Codex schema conformance (defects found 2026-09-28) ---
-  //
-  // These lock the exact shapes that were wrong before, so a future edit cannot
-  // silently reintroduce a config Codex accepts-but-cannot-authenticate.
-
-  it('sets requires_openai_auth = false so Codex does not hijack ChatGPT OAuth', () => {
-    applyCodexKaixuanPreset('kaixuan-kxpms')
-    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
-    expect(written).toContain('requires_openai_auth = false')
-    expect(written).not.toContain('requires_openai_auth = true')
-  })
-
-  it('embeds the caller-supplied key as experimental_bearer_token, never as api_key', () => {
-    applyCodexKaixuanPreset('kaixuan-kxpms', { apiKey: 'sk-test-token' })
-    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
-    expect(written).toContain('experimental_bearer_token = "sk-test-token"')
-    expect(written).not.toMatch(/^api_key\s*=/m)
-  })
-
-  it('drops a previously embedded token when switching presets or clearing', () => {
-    const configPath = join(workingHome, 'config.toml')
-    applyCodexKaixuanPreset('kaixuan-local', { apiKey: 'sk-local-secret' })
-    applyCodexKaixuanPreset('kaixuan-kxpms', { apiKey: 'sk-kxpms-secret' })
-    let written = readFileSync(configPath, 'utf-8')
-    expect(written).toContain('experimental_bearer_token = "sk-kxpms-secret"')
-    expect(written).not.toContain('sk-local-secret')
-    applyCodexKaixuanPreset(null)
-    written = readFileSync(configPath, 'utf-8')
-    expect(written).not.toContain('experimental_bearer_token')
-    expect(written).not.toContain('sk-kxpms-secret')
-  })
-
-  it('escapes TOML-special characters in an embedded bearer token', () => {
-    applyCodexKaixuanPreset('kaixuan-kxpms', { apiKey: 'sk-a"b\\c' })
-    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
-    expect(written).toContain('experimental_bearer_token = "sk-a\\"b\\\\c"')
-  })
-
-  // --- v4: custom provider registry ---
-
-  it('applyCodexProvider writes a custom provider table without disturbing built-ins', () => {
-    const configPath = join(workingHome, 'config.toml')
-    const result = applyCodexProvider(GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
-    expect(result.error).toBeNull()
-    expect(result.providerId).toBe('glm-5.2')
-    const written = readFileSync(configPath, 'utf-8')
-    expect(written).toContain('model_provider = "glm-5.2"')
-    expect(written).toContain('[model_providers.glm-5.2]')
-    expect(written).toContain('base_url = "https://api.z.ai/api/coding/paas/v4"')
-    // The custom table must not be confused with a built-in.
-    expect(written).not.toContain('[model_providers.kaixuan-')
-  })
-
-  it('switching from built-in to custom removes the built-in table and replaces it', () => {
-    applyCodexKaixuanPreset('kaixuan-local')
-    applyCodexProvider(GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
-    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
-    expect(written).toContain('model_provider = "glm-5.2"')
-    expect(written).toContain('[model_providers.glm-5.2]')
-    expect(written).not.toContain('[model_providers.kaixuan-local]')
-    expect(written).not.toMatch(/^model_provider\s*=\s*"kaixuan-/m)
-  })
-
-  it('switching from one custom provider to another replaces only that one', () => {
-    const kimiProvider: ProviderPresetDefinition = {
-      ...GLM_PROVIDER,
-      id: 'kimi-k2',
-      label: 'Kimi K2',
-      modelProviderName: 'kimi-k2',
-      codexProviderName: 'Kimi K2',
-      codexBaseUrl: 'https://api.moonshot.cn/v1'
-    }
-    const registry = new Set<string>(['glm-5.2', 'kimi-k2'])
-    applyCodexProvider(GLM_PROVIDER, registry)
-    applyCodexProvider(kimiProvider, registry)
-    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
-    expect(written).toContain('model_provider = "kimi-k2"')
-    expect(written).toContain('[model_providers.kimi-k2]')
-    expect(written).not.toContain('[model_providers.glm-5.2]')
-  })
-
-  it('readActiveCodexProvider resolves the active id when known to the registry', () => {
-    const content = 'theme = "dark"\nmodel_provider = "glm-5.2"\n[model_providers.glm-5.2]\n'
-    expect(readActiveCodexProvider(content, KNOWN_BUILT_IN_AND_GLM)).toBe('glm-5.2')
-  })
-
-  it('readActiveCodexProvider returns null when the active id is not in the registry', () => {
-    const content = 'model_provider = "glm-5.2"\n[model_providers.glm-5.2]\n'
-    // Same config, but renderer forgot to include glm-5.2 in its known list —
-    // we must NOT guess; treat as no active provider.
-    expect(readActiveCodexProvider(content, BUILT_IN_PROVIDER_IDS)).toBeNull()
-  })
-
-  it('renderCodexConfigForProvider is pure and round-trips a custom provider', () => {
-    const once = renderCodexConfigForProvider('', GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
-    const twice = renderCodexConfigForProvider(once, GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
-    expect(twice).toBe(once)
-  })
-
-  it('clears both built-in and custom artifacts when provider=null', () => {
-    const configPath = join(workingHome, 'config.toml')
-    applyCodexKaixuanPreset('kaixuan-local')
-    applyCodexProvider(GLM_PROVIDER, KNOWN_BUILT_IN_AND_GLM)
-    const result = applyCodexProvider(null, KNOWN_BUILT_IN_AND_GLM)
-    expect(result.providerId).toBeNull()
-    const written = readFileSync(configPath, 'utf-8')
-    expect(written).not.toContain('[model_providers.glm-5.2]')
-    expect(written).not.toContain('[model_providers.kaixuan-')
-    expect(written).not.toMatch(/^model_provider\s*=\s*"(glm|kaixuan)-/m)
-  })
-
-  it('still uses KAIXUAN_PRESETS values for the wrapper path (smoke)', () => {
-    const beforeApply = KAIXUAN_PRESETS['kaixuan-local']
-    applyCodexKaixuanPreset('kaixuan-local')
-    const written = readFileSync(join(workingHome, 'config.toml'), 'utf-8')
-    expect(written).toContain(`base_url = "${beforeApply.codexBaseUrl}"`)
   })
 })

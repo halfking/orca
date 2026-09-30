@@ -5,9 +5,9 @@ import type {
 import type { CodexConfigSyncStatus } from '../../shared/codex-config-sync-types'
 import type { GrokAccountStatus } from '../../shared/rate-limit-types'
 import type {
+  KaixuanPresetId,
   ProviderPresetAgentId,
-  ProviderPresetApplyResult,
-  ProviderPresetDefinition
+  ProviderPresetApplyResult
 } from '../../shared/provider-preset-types'
 
 export type CodexAccountsApi = {
@@ -88,25 +88,20 @@ export type CodexConfigSyncApi = {
 
 export type ProviderPresetsApi = {
   applyCodex: (args: {
-    provider: ProviderPresetDefinition | null
+    presetId: KaixuanPresetId | null
     apiKey?: string | null
-    knownProviders: readonly ProviderPresetDefinition[]
   }) => Promise<ProviderPresetApplyResult>
   applyClaude: (args: {
-    provider: ProviderPresetDefinition | null
+    presetId: KaixuanPresetId | null
     apiKey?: string | null
     configDirName?: string
   }) => Promise<ProviderPresetApplyResult>
   applyOpenCode: (args: {
-    provider: ProviderPresetDefinition | null
+    presetId: KaixuanPresetId | null
     apiKey?: string | null
-    knownProviders: readonly ProviderPresetDefinition[]
   }) => Promise<ProviderPresetApplyResult>
-  getCurrent: (args: {
-    agentId: ProviderPresetAgentId
-    knownProviders: readonly ProviderPresetDefinition[]
-  }) => Promise<{
-    providerId: string | null
+  getCurrent: (args: { agentId: ProviderPresetAgentId }) => Promise<{
+    presetId: KaixuanPresetId | null
     configPath: string
   }>
 }

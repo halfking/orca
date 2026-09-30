@@ -51,7 +51,9 @@ export function normalizeEntry(raw) {
     outcome: raw.outcome ?? null,
     verdict: raw.verdict ?? null,
     findings: raw.findings ?? null,
+    regression: raw.regression ?? null,
     nextAction: Array.isArray(raw.nextAction) ? raw.nextAction : null,
+    runtimeTaskId: raw.runtimeTaskId ?? null,
     deps: Array.isArray(raw.deps) ? raw.deps : [],
     filesModified: Array.isArray(raw.filesModified) ? raw.filesModified : [],
     reportPath: raw.reportPath ?? null,
@@ -119,11 +121,13 @@ export function foldLedger(entries) {
         placement: null,
         state: 'pending',
         dispatch: null,
+        runtimeTaskId: null,
         liveness: null,
         stage: null,
         outcome: null,
         verdict: null,
         findings: null,
+        regression: null,
         nextAction: null,
         files: new Set(),
         reportPaths: [],
@@ -134,6 +138,12 @@ export function foldLedger(entries) {
     const task = tasks.get(id)
     if (entry.dispatch) {
       task.dispatch = entry.dispatch
+    }
+    // The plan's own id is what the DAG, the merge order and every report are keyed on. The
+    // runtime id is kept beside it, never instead of it: a view keyed on runtime ids fragments
+    // the moment a task is re-created, and stops matching the plan that produced it.
+    if (entry.runtimeTaskId) {
+      task.runtimeTaskId = entry.runtimeTaskId
     }
     if (entry.role) {
       task.role = entry.role
@@ -167,6 +177,9 @@ export function foldLedger(entries) {
     }
     if (entry.findings != null) {
       task.findings = entry.findings
+    }
+    if (entry.regression != null) {
+      task.regression = entry.regression
     }
     if (entry.nextAction) {
       task.nextAction = entry.nextAction
@@ -292,6 +305,12 @@ function pad(value, width) {
   return text.length >= width ? text.slice(0, width) : text.padEnd(width)
 }
 
+/** Verdict and outcome are never truncated: `pass_with_findings` cut to `pass_with_` reads as pass. */
+function padVerdict(value) {
+  const text = value == null || value === '' ? '-' : String(value)
+  return text.padEnd(20)
+}
+
 export function renderView(folded, blocking, matrix, order) {
   const lines = []
   lines.push(`RUN ${folded.run ?? '(unknown)'}  tasks=${folded.tasks.length}`)
@@ -311,7 +330,7 @@ export function renderView(folded, blocking, matrix, order) {
       lines.push(
         `    ${pad(task.id, 14)} ${pad(task.role, 13)} ${pad(task.agent, 9)} ` +
           `${pad(task.model, 22)} ${pad(task.effort, 7)} ${pad(task.state, 11)} ` +
-          `${pad(task.verdict ?? task.outcome, 10)} ${pad(placement, 28)} files=${task.files.size}`
+          `${padVerdict(task.verdict ?? task.outcome)} ${pad(placement, 28)} files=${task.files.size}`
       )
     }
   }
@@ -375,7 +394,7 @@ export function renderView(folded, blocking, matrix, order) {
   for (const [index, id] of order.entries()) {
     const task = folded.tasks.find((t) => t.id === id)
     lines.push(
-      `  ${index + 1}. ${pad(id, 14)} verdict=${pad(task?.verdict ?? task?.outcome ?? null, 10)} ` +
+      `  ${index + 1}. ${pad(id, 14)} verdict=${padVerdict(task?.verdict ?? task?.outcome ?? null)} ` +
         `files=${pad(task?.files.size ?? 0, 4)} report=${task?.reportPaths.at(-1) ?? '-'}`
     )
   }
@@ -421,6 +440,13 @@ function parseArgs(argv) {
 
 function runRecord(args) {
   const sources = []
+  if (args.stdin) {
+    for (const line of readFileSync(0, 'utf8').split('\n')) {
+      if (line.trim() !== '') {
+        sources.push(JSON.parse(line))
+      }
+    }
+  }
   if (args.entry) {
     sources.push(JSON.parse(args.entry))
   }
@@ -432,7 +458,7 @@ function runRecord(args) {
     }
   }
   if (sources.length === 0) {
-    throw new Error('record needs --entry <json> or --receipts <jsonl>')
+    throw new Error('record needs --stdin, --entry <json> or --receipts <jsonl>')
   }
   const run = requireString(args.run ?? sources[0].run, 'run')
   const ledgerPath = resolve(args.ledger ?? defaultLedgerPath(run))
