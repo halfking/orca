@@ -20,7 +20,8 @@ const CANONICAL_GUIDE_NAMES = [
   'orca-emulator-android',
   'orca-linear',
   'orca-per-workspace-env',
-  'orchestration'
+  'orchestration',
+  'zcode'
 ]
 
 // Why: old discovery stubs can outlive a rename indefinitely, so aliases are
@@ -33,7 +34,8 @@ const GUIDE_ALIASES = {
   'orca-emulator-android': [],
   'orca-linear': [],
   'orca-per-workspace-env': [],
-  orchestration: []
+  orchestration: [],
+  zcode: []
 }
 
 // Why: a stubbed topic ships a hybrid discovery stub as its installable projection while
@@ -49,7 +51,8 @@ const STUB_TOPICS = [
   'orca-emulator-android',
   'orca-linear',
   'orca-per-workspace-env',
-  'orchestration'
+  'orchestration',
+  'zcode'
 ]
 
 function normalizeMarkdown(markdown) {
@@ -382,8 +385,17 @@ async function verifyArtifacts(artifacts, repoRoot = REPO_ROOT) {
 }
 
 async function main() {
+  const write = process.argv.includes('--write')
+  const check = process.argv.includes('--check')
   const artifacts = await buildArtifacts()
-  await (process.argv.includes('--write') ? writeArtifacts : verifyArtifacts)(artifacts)
+  if (write) {
+    await writeArtifacts(artifacts)
+    return
+  }
+  await verifyArtifacts(artifacts)
+  if (check) {
+    console.log('Bundled skill guides are up to date.')
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
