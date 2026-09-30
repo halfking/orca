@@ -68,6 +68,7 @@ were duplicates of coverage impl_b had already shipped. Both rejections are in t
 | `finding-17-proposed-fix.md`                                           | the fix shape, its cost, and the design question left open                          |
 | `35-merge-plan-with-branch.txt`                                         | the same run with `branch` recorded: correct ORDER, `halfking/test_a` in it        |
 | `backfill-branch.mjs`                                                   | rebuilds that ledger and prints the plan; run it to reproduce the file above       |
+| `36-where-the-branch-is-available.md`                                   | read-only survey: the branch is unknowable at dispatch, known right after worktree creation, and dropped by `PlacedWorktree` |
 
 Taken together: the merge machinery is sound in both directions and is fed one wrong ref.
 

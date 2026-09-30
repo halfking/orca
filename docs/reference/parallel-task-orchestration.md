@@ -675,7 +675,16 @@ ORDER
   4. test_b         halfking/test_b2    | shares files with impl_b
 ```
 
-**仍未解决、且仍然需要人来定的只剩一件**：真实 run 里**没有人自动调 `record-done`**，所以真实账本的 `branch` 依然是空的。这次解决的是"**能不能记**"，不是"**谁来记**"——派发流要不要在 worker settle 时自动调 `record-done`、branch 从 worker 自报还是从 `worker-start` 的落点取，是设计决策，不是机械改动。
+**剩下的问题已做过只读勘查，答案是确定的（`.p4-evidence/36-where-the-branch-is-available.md`）**，它比"需要人来定"具体得多：
+
+1. **派发时不知道落地分支，而且这是对的。** `runtime-local-worktree-create-candidate.ts:87-104` 在一个**避让循环**里算分支名——名字取决于仓库里什么已被占用。本 run 自己的收据就是证据：worktree 叫 `pilot-impl-a-2`、分支是 `refs/heads/pilot-impl-a-2`，那个 `-2` 因为 `pilot-impl-a` 已存在。所以"派发时把 branch 记下来"**不成立**。
+2. **创建完的那一刻，运行时就知道。** `createWorkerWorktree` 返回完整的 worktree 记录（`worker-worktree-creation.ts:134-138`），其中带 `branch`——实测 `worktree.branch = refs/heads/pilot-impl-a-2`。
+3. **编排层把它扔了。** `worker-start-agent-placement.ts:35` 是 `type PlacedWorktree = { id: string; repoId: string }`：把上面那条完整记录**裁成两个字段**，`branch` 不在其中。**门禁唯一需要的字段，恰好在它免费可得的那一点被丢掉。** 这与缺陷 17 是同一形状，只是高一层。
+4. **账本的 `placement.worktree` 也不能用来反查。** 它看着像标识符其实不是：impl_a / impl_b 两行记的是 CLI 选择器字面量 `new-child`（实际目录叫 `impl_a-2`），test_a / test_b / test_b2 才是真目录名。**同一个字段在不同行是两种东西**——和 `placement.base` 一模一样，靠它反查会静默失败。
+
+**所以问题不是"谁来记"，而是"记哪个字段"**：来源只能是 `createWorkerWorktree` 返回的 worktree 记录，需要 `PlacedWorktree` 保留 `branch` 并由 worker-start 收据暴露出来。**"问 worker 落在哪"是多余的**（运行时不用问就知道），**"settle 时查账本"是走不通的**（字段不可用）。
+
+这是一个既有返回类型的**小幅拓宽**，不是设计题——但它要改 Orca 运行时，而本文档"风险与边界"一节把改上游运行时明确划在默认路径之外。**记录在案，未实现**，等一个愿意做这个决定的人。
 
 **风险与边界**
 
