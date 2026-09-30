@@ -1,0 +1,41 @@
+Both directions of the merge gate, measured 2026-09-30 13:05:05
+throwaway repositories throughout; the pilot worktree was never a target.
+
+=== CLOSED: refuses, repository untouched (33-closed-gate-execute-guard.txt) ===
+  worktree clean, ORDER non-empty, gate CLOSED
+  -> 'merge gate is closed; nothing was merged', exit 1, a.txt and HEAD unchanged
+
+=== OPEN: merges, in the order the ledger suggests ===
+gate OPEN needs more than a verdict. First attempt was still CLOSED:
+  blocked by audit_a: no report path recorded...; no regression recorded...
+regression has to be an object with a command (verdict-contract.mjs:87), and the audit
+needs a reportPath, or the verdict cannot be re-read (line 82). Both are in the contract;
+neither is guessable from the field name.
+
+With reportPath + regression{command,result} on both audits:
+
+  AUDIT VERDICTS
+    audit_a  pass  findings=0 reports=1 tested=yes
+    audit_b  pass  findings=0 reports=1 tested=yes
+  MERGE GATE: OPEN
+
+  MERGE PLAN  base=main  gate OPEN
+  ORDER
+    1. impl_a   feature-a
+    2. impl_b   feature-b
+  merged feature-a
+  merged feature-b
+  merged 2 branch(es) into main
+  exit=0
+
+  repository after: a.txt=work-a  shared.txt=work-b
+    163e7b4 merge feature-b (task impl_b)
+    05029b4 merge feature-a (task impl_a)
+
+What this settles: the merge machinery is not broken. Ordering, execution, and the
+record of what landed all work. The one thing wrong is which branch it resolves — and it
+resolves correctly here only because this fixture fills placement.base with the LANDING
+branch, which is the meaning the test suite uses and the meaning a real ledger does not.
+
+So finding 17 is now bounded from both sides: the machine works, and it is fed the wrong
+ref. Fixing the ref fixes the merge; there is nothing else to rebuild.
