@@ -682,9 +682,37 @@ ORDER
 3. **编排层把它扔了。** `worker-start-agent-placement.ts:35` 是 `type PlacedWorktree = { id: string; repoId: string }`：把上面那条完整记录**裁成两个字段**，`branch` 不在其中。**门禁唯一需要的字段，恰好在它免费可得的那一点被丢掉。** 这与缺陷 17 是同一形状，只是高一层。
 4. **账本的 `placement.worktree` 也不能用来反查。** 它看着像标识符其实不是：impl_a / impl_b 两行记的是 CLI 选择器字面量 `new-child`（实际目录叫 `impl_a-2`），test_a / test_b / test_b2 才是真目录名。**同一个字段在不同行是两种东西**——和 `placement.base` 一模一样，靠它反查会静默失败。
 
-**所以问题不是"谁来记"，而是"记哪个字段"**：来源只能是 `createWorkerWorktree` 返回的 worktree 记录，需要 `PlacedWorktree` 保留 `branch` 并由 worker-start 收据暴露出来。**"问 worker 落在哪"是多余的**（运行时不用问就知道），**"settle 时查账本"是走不通的**（字段不可用）。
+**所以问题不是"谁来记"，而是"记哪个字段"**：落地分支的**权威来源**是 worktree 记录（`createWorkerWorktree` 的返回值），这一点不变。
 
-这是一个既有返回类型的**小幅拓宽**，不是设计题——但它要改 Orca 运行时，而本文档"风险与边界"一节把改上游运行时明确划在默认路径之外。**记录在案，未实现**，等一个愿意做这个决定的人。
+#### 工具侧解析器：不必改运行时即可拿到 branch（已实现）
+
+上一版结论说"必须拓宽 `PlacedWorktree` 并改 worker-start 收据形状"——**这一步被本轮勘查推翻**。运行时内部确实在 `createWorkerWorktree` 就知道 branch、也确实在 `PlacedWorktree` 处裁掉了它，但**协调者不需要运行时亲手递过来**：worker-start 收据里已经带了一个可解析的锚点，而解析它用的是**既有公开 RPC**：
+
+1. `worker-worktree-creation.ts:75-79` 在建 worktree 时把 `{kind:'worktree', id: created.worktree.id}` 推进 `effects`；
+2. 该 `effects` 随 worker-start 收据返回（`deliverAndSettleWorkerStartReadiness` 的两个 return 都带 `effects`），协调者 CLI 看得见；
+3. `worktree.show`（`worktree.ts:51-56`）用**裸 selector 即可按 `worktree.id` 解析**（`orca-runtime-resolve-worktree-selector.ts` 的裸分支 `worktree.id === selector`），返回**含 `branch` 的完整记录**。
+
+于是 settle 侧可纯靠只读把 branch 落到账本：worker-start 收据 → `effects[kind=worktree].id` → `orca worktree show <id>` → `branch`（剥 `refs/heads/` 变短名）→ `record-done --branch`（写入端 `c3bc8f173` 已就位）。**全程零运行时源码改动、零新 RPC、零 schema/契约变更**，守住"不改上游运行时"边界。
+
+**实现（已接线，非孤岛）**——`config/scripts/orchestration-landing-branch.mjs`（77 有效行）：
+
+| 出口 | 用途 |
+| ---- | ---- |
+| `landingBranchFromReceipt(receipt, showWorktree?)` | 库出口，纯函数 + 注入式 IO，可单测 |
+| `node orchestration-landing-branch.mjs <receipt.json>` | **CLI 出口**，打印分支或**非零退出且 stdout 为空**（settle 可 shell 调用） |
+| `.p4-evidence/p4-finish.mjs landings` | **真实调用点**：从捕获的收据证明每条落地分支；`preflight` 的分支存在性检查已由它驱动 |
+
+原先 `p4-finish.mjs` 里的 `preflight` 用**硬编码** `['halfking/impl_a-2','halfking/impl_b']` 验分支存在——现已替换为逐任务从**它自己的** worker-start 收据解析。**少一次手工维护，且不再依赖任何一份手记的分支名。**
+
+**fail-closed 契约**：取不到 / 取到多个不同 worktree id / `worktree.show` 失败 / 记录无 branch → 解析器返回 `null`、CLI **非零退出且不输出任何分支**，**绝不回退 `placement.base`**（那个回退正是缺陷 17 本身，且会安静地合错分支）。拿不到 branch 的任务由门禁**阻断**而非合并。CLI 层的这条契约由 `orchestration-landing-branch-cli.test.mjs` 驱动**真实二进制**钉住（防止"库能解析、shell 调不到"再次发生）。
+
+> **运行态边界（诚实记录）**：本轮只取到**代码级**证据——Orca runtime 当时 `runtime_unavailable`，且 `.p4-evidence/` 里没有一次**成功**的 worker-start 收据（`10-*` 是 task-create，三份 `20-*` 全失败）。`effects → worktree.show → branch` 这条链要补一次**运行级正控**才算完全验证：起 runtime → 一次 dispatch → 读收据 effects → `worktree.show` → 拿到 branch。**当前所有测试的正控都靠注入的 fake worktree.show，真实 RPC 往返尚未端到端跑通。**
+
+> **一个诱饵收据的证伪**：本节上一版把 `.p4-evidence/20-impl_a-worktree-create.json`（`branch=refs/heads/pilot-impl-a-2`）当"impl_a 落点"的正例，那是**错的**——它是 `p4.mjs` 协调者**手动 `orca worktree create pilot-impl-a`** 的产物（不同机制），且对应 dispatch 实际**失败**（`task_not_startable` / `selector_ambiguous`）。impl_a 的工作真正落在 **`halfking/impl_a-2`**（`git worktree list` + commit `f5e8094c9 "wait at the wave boundary"` 与 plan 的 impl_a spec 对得上）。结论对、证据错——`pilot-impl-a-*` 那条线指向**错的 branch**。这反而**加强**了工具侧方案：只有取 worker **真实 placement** 的 worktree id 才对。
+
+> **本轮自我审计修正**：第一版提交把解析器写成**纯库、无 CLI、零消费者**，却表述为"已完成"——**这是过头**。批判式审计 grep 出调用数为 0 后才补上 CLI 入口、接进 `p4-finish`，并用变异 M6（CLI 回落猜测）/ M7（删掉 CLI 入口）确认新门真的会红。**"有实现+有测试"≠"已接线可用"**，后者才是完成。
+
+**是否仍改运行时？——不必，运行时改动降级为"便利"**。让 `PlacedWorktree` 保留 `branch` 并在收据里内联，只剩一个便利价值（少一次 RPC 往返、branch 内联可读），不再是**必要**。既然工具侧已能在不改上游的前提下拿到权威值，**默认路径不动运行时**；把改运行时登记为可选的收敛项（若日后想让收据自解释再议）。
 
 **风险与边界**
 

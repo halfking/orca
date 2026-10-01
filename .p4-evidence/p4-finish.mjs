@@ -17,8 +17,9 @@
 // Every step is read-only except `audit` and `merge`, and both refuse to run unless preflight passes.
 
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { landingBranchFromReceipt } from '../config/scripts/orchestration-landing-branch.mjs'
 
 const REPO = '/Users/xutaohuang/workspace/ai/orca-wt-orca2'
 const RUN = process.env.P4_RUN ?? 'run_f8f2a6573946'
@@ -27,6 +28,35 @@ const AUDIT_AGENT = process.env.P4_AUDIT_AGENT ?? 'claude'
 const LEDGER = join(REPO, '.orca/orchestration-ledger', `${RUN}.jsonl`)
 const GATE_LEDGER = join(REPO, '.p4-evidence', 'merge-gate-ledger.jsonl')
 const PLAN = JSON.parse(readFileSync(join(REPO, 'p4-pilot-plan.json'), 'utf8'))
+
+/** The worker-start receipts the pilot dispatched, keyed by the runtime dispatch id. */
+const RECEIPTS_DIR = join(REPO, '.p4-evidence')
+
+/**
+ * Resolve each dispatched task's landing branch from its OWN worker-start receipt.
+ *
+ * This replaces a hardcoded `['halfking/impl_a-2', 'halfking/impl_b']` that had been correct only
+ * by hand and pointed at a decoy worktree in one capture. The branch is proven or it is not
+ * recorded: `landingBranchFromReceipt` returns null rather than guessing, and this leaves the task
+ * out of the map so the gate blocks it instead of merging the wrong branch.
+ */
+function landingBranches() {
+  const branches = new Map()
+  for (const name of existsSync(RECEIPTS_DIR) ? readdirSync(RECEIPTS_DIR) : []) {
+    if (!name.endsWith('.json')) continue
+    let receipt
+    try {
+      receipt = JSON.parse(readFileSync(join(RECEIPTS_DIR, name), 'utf8'))
+    } catch {
+      continue
+    }
+    const branch = landingBranchFromReceipt(receipt)
+    if (branch !== null) {
+      branches.set(name, branch)
+    }
+  }
+  return branches
+}
 
 function orca(args) {
   let out
@@ -86,13 +116,27 @@ function preflight() {
   const runTasks = orca(['orchestration', 'task-list', '--run', RUN, '--json']).result.tasks ?? []
   if (runTasks.length === 0) problems.push(`run ${RUN} has no task; the pilot run is not the bound one`)
 
-  for (const branch of ['halfking/impl_a-2', 'halfking/impl_b']) {
-    const found = execFileSync('git', ['rev-parse', '--verify', branch], {
-      cwd: REPO,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
-    if (!found) problems.push(`branch ${branch} does not exist`)
+  // Prove each dispatched task's landing branch from its own worker-start receipt. A task whose
+  // branch cannot be proven is a task the gate must block, so naming it here stops the run before
+  // four worker terminals are spent producing a plan that cannot be built.
+  const landings = landingBranches()
+  const dispatched = runTasks.filter((task) => task.task_title && !task.task_title.startsWith('merge'))
+  for (const task of dispatched) {
+    const resolved = [...landings.entries()].find(([name]) => name.includes(task.task_id ?? ''))
+    if (!resolved) {
+      problems.push(`no provable landing branch for task ${task.task_id} (${task.task_title})`)
+      continue
+    }
+    const [, branch] = resolved
+    try {
+      execFileSync('git', ['rev-parse', '--verify', branch], {
+        cwd: REPO,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+    } catch {
+      problems.push(`landing branch ${branch} (${task.task_title}) does not exist in the repository`)
+    }
   }
 
   // The audit must be a different agent from the ones it audits, and that is enforced by the merge
@@ -207,7 +251,16 @@ if (command === 'preflight') {
       encoding: 'utf8'
     })
   )
+} else if (command === 'landings') {
+  // Prove each landing branch from the receipts alone, with no git and no runtime. Read-only, and
+  // it is how a reviewer confirms the branch the gate will plan on without trusting any hand note.
+  const landings = landingBranches()
+  if (landings.size === 0) {
+    out('no provable landing branch in the captured receipts (none recorded, or worktree.show failed)')
+  } else {
+    for (const [name, branch] of [...landings.entries()].sort()) out(`${name}\t${branch}`)
+  }
 } else {
-  process.stderr.write('usage: p4-finish.mjs <preflight|audit|gate|merge|replay>\n')
+  process.stderr.write('usage: p4-finish.mjs <preflight|landings|audit|gate|merge|replay>\n')
   process.exitCode = 1
 }
